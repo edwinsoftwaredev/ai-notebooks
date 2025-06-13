@@ -1,0 +1,5 @@
+.venv
+desktop.ini
+cifar10/content
+
+__pycache__
