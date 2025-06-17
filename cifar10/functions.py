@@ -47,12 +47,12 @@ def train_model(config):
     epochs = config['epochs']
     batch_size = config['batch_size']
     weight_decay = config['weight_decay']
-    schdler_patience = config['schdler_patience']
-    schdler_factor = config['schdler_factor']
+    schdlr_patience = config['schdlr_patience']
+    schdlr_factor = config['schdlr_factor']
 
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=schdler_patience, factor=schdler_factor)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=schdlr_patience, factor=schdlr_factor)
 
     wandb.init(project='cifar10', group='experiment_4', config=config)
 

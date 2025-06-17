@@ -6,62 +6,93 @@ from functions import train_model
 
 config = {
     'model_config': {
-        'l1_c': tune.choice([32]),
-        'l1_cnk': tune.choice([3]),
-        'l1_pk': tune.choice([3]),
-        'l1_ps': tune.choice([1]),
-    
-        'l2_c': tune.choice([64]),
-        'l2_cnk': tune.choice([3]),
-        'l2_pk': tune.choice([3]),
-        'l2_ps': tune.choice([1]),
-    
-        'l3_c': tune.choice([128]),
-        'l3_cnk': tune.choice([3]),
-        'l3_pk': tune.choice([3]),
-        'l3_ps': tune.choice([1]),
-    
-        'l4_c': tune.choice([256]),
-        'l4_cnk': tune.choice([3]),
-        'l4_pk': tune.choice([3]),
-        'l4_ps': tune.choice([1]),
-    
-        'l5_c': tune.choice([512]),
-        'l5_cnk': tune.choice([3]),
-        'l5_pk': tune.choice([3]),
-        'l5_ps': tune.choice([1]),
-
-        # 'l6_c': tune.choice([256]),
-        # 'l6_cnk': tune.choice([3]),
-        # 'l6_pk': tune.choice([3]),
-        # 'l6_ps': tune.choice([1]),
-
-        # 'l7_c': tune.choice([256]),
-        # 'l7_cnk': tune.choice([3]),
-        # 'l7_pk': tune.choice([3]),
-        # 'l7_ps': tune.choice([1]),
-
-        # 'l8_c': tune.choice([512]),
-        # 'l8_cnk': tune.choice([3]),
-        # 'l8_pk': tune.choice([3]),
-        # 'l8_ps': tune.choice([1]),
-
-        # 'l9_c': tune.choice([512]),
-        # 'l9_cnk': tune.choice([3]),
-        # 'l9_pk': tune.choice([3]),
-        # 'l9_ps': tune.choice([1]),
-
-        # 'l10_c': tune.choice([512]),
-        # 'l10_cnk': tune.choice([3]),
-        # 'l10_pk': tune.choice([3]),
-        # 'l10_ps': tune.choice([1]),
+        'l1': {
+            'conv2d': {
+                'channels': tune.choice([32]),
+                'kernel': tune.choice([3]),
+                'padding': tune.choice([1]),
+                'stride': tune.choice([1])
+            },
+            'dropout': {
+                'prob': 0.3
+            },
+            # 'maxpool': {
+            #     'kernel': tune.choice([3]),
+            #     'padding': tune.choice([1]),
+            #     'stride': tune.choice([1]),
+            # }
+        },
+        'l2': {
+            'conv2d': {
+                'channels': tune.choice([64]),
+                'kernel': tune.choice([3]),
+                'padding': tune.choice([1]),
+                'stride': tune.choice([1])
+            },
+            'dropout': {
+                'prob': 0.3
+            },
+            # 'maxpool': {
+            #     'kernel': tune.choice([3]),
+            #     'padding': tune.choice([1]),
+            #     'stride': tune.choice([1])
+            # }
+        },
+        'l3': {
+            'conv2d': {
+                'channels': tune.choice([128]),
+                'kernel': tune.choice([3]),
+                'padding': tune.choice([0]),
+                'stride': tune.choice([2])
+            },
+            # 'dropout': {
+            #     'prob': 0
+            # },
+            # 'maxpool': {
+            #     'kernel': tune.choice([3]),
+            #     'padding': tune.choice([0]),
+            #     'stride': tune.choice([1])
+            # }
+        },
+        'l4': {
+            'conv2d': {
+                'channels': tune.choice([256]),
+                'kernel': tune.choice([3]),
+                'padding': tune.choice([0]),
+                'stride': tune.choice([2])
+            },
+            # 'dropout': {
+            #     'prob': 0
+            # },
+            # 'maxpool': {
+            #     'kernel': tune.choice([3]),
+            #     'padding': tune.choice([0]),
+            #     'stride': tune.choice([1])
+            # }
+        },
+        'l5': {
+            'conv2d': {
+                'channels': tune.choice([512]),
+                'kernel': tune.choice([3]),
+                'padding': tune.choice([0]),
+                'stride': tune.choice([2])
+            },
+            # 'dropout': {
+            #     'prob': 0
+            # },
+            # 'maxpool': {
+            #     'kernel': tune.choice([3]),
+            #     'padding': tune.choice([0]),
+            #     'stride': tune.choice([1])
+            # }
+        }
     },
 
     'lr': tune.choice([1e-2]),
-    'weight_decay': tune.choice([5e-4]),
-    'schdler_patience': tune.choice([3]),
-    'schdler_factor': tune.choice([0.5]),
     'batch_size': tune.choice([64]),
+    'weight_decay': 5e-4,
+    'schdlr_patience': 3,
+    'schdlr_factor': 0.5,
     'epochs': 100,
     'num_trials': 1,
 }
