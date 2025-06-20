@@ -6,6 +6,7 @@ wandb
 dask
 dask[complete]
 ray[tune]
+matplotlib
 huggingface_hub
 fsspec
 pyarrow
