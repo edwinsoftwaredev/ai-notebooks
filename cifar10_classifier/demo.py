@@ -16,8 +16,9 @@ import io
 
 import wandb
 
-from cifar10.cnn import CNN
-from cifar10.datasets import load_datasets
+from cifar10_classifier.cnn import CNN
+from cifar10_classifier.datasets import load_datasets
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

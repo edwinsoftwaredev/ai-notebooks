@@ -1,5 +1,5 @@
 .venv
 desktop.ini
-cifar10/content
+cifar10_classifier/content
 
 __pycache__
