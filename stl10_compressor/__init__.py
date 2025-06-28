@@ -2,7 +2,9 @@ from ray import tune
 from ray.tune.schedulers import ASHAScheduler
 
 import torch
+import wandb
 
+from stl10_compressor.demo import demo
 from stl10_compressor.functions import train_model
 
 config = {
@@ -50,18 +52,19 @@ config = {
             'l01': {
                 'conv2d': {
                     'in': 256,
-                    'out': 512,
+                    'out': 28,
                     'kernel': tune.choice([3]),
                     'padding': tune.choice([0]),
                     'stride': tune.choice([2])  # 22
                 }
             }
+            # (96x96x3) / (22x22x28) ~= 1:2 compression
         },
         
         'decoder': {
             'l01': {
                 'convT2d': {
-                    'in': 512,
+                    'in': 28,
                     'out': 128,
                     'kernel': tune.choice([3]),
                     'padding': tune.choice([0]),
@@ -108,7 +111,7 @@ config = {
     'weight_decay': 5e-4,
     'schdlr_patience': 3,
     'schdlr_factor': 0.5,
-    'epochs': 100,
+    'epochs': 10,
     'num_trials': 1,
 }
 
@@ -148,4 +151,8 @@ best_result = results.get_best_result('test_loss', 'min')
 
 print(f'Best trial config: { best_result.config }')
 print(f'Best trial final validation loss: { best_result.metrics["test_loss"] }')
-print(f'Best trial final validation accuracy: { best_result.metrics["test_accuracy"] }')
+
+image = demo(best_result)
+wandb.init(project='stl10_compressor', group='experiment_1')
+wandb.log({"examples": [wandb.Image(image)]})
+wandb.finish()

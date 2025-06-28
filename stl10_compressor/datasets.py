@@ -46,6 +46,10 @@ def load_datasets():
 
     images = np.reshape(ndarray, (-1, 3, 96, 96))
 
+    # fix orientation by swaping axis 1 and 2
+    images = images.transpose(0, 1, 3, 2) 
+
+
     # Dask
     # dda = da.from_array(images, chunks=(50000, 3, 96, 96))
 
