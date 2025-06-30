@@ -45,9 +45,12 @@ def train_model(config):
     lr = config['lr']
     epochs = config['epochs']
     batch_size = config['batch_size']
+    schdlr_patience = config['schdlr_patience']
+    schdlr_factor = config['schdlr_factor']
     
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=schdlr_patience, factor=schdlr_factor)
 
     wandb.init(project='stl10_compressor', group='experiment_1', config=config)
 
@@ -105,6 +108,10 @@ def train_model(config):
 
         train_loss = train_state['loss'] / train_state['nbatches']
         test_loss = test_state['loss'] / test_state['nbatches']
+
+        scheduler.step(test_loss)
+
+        print(f'last lr: {scheduler.get_last_lr()}')
 
         wandb.log({ 'train_loss': train_loss, 'epoch': t })
         wandb.log({ 'test_loss': test_loss, 'epoch': t })

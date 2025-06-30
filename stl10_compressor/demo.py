@@ -102,10 +102,10 @@ def demo(result):
                     
                     for i in range(len(X)):
                         if len(best) < 20:
-                            heapq.heappush(best, (loss[i], next(counter), (X[i], output[i])))
-                        elif best[0][0] > loss[i]:
+                            heapq.heappush(best, (-loss[i], next(counter), (X[i], output[i])))
+                        elif abs(best[0][0]) > loss[i]:
                             heapq.heappop(best)
-                            heapq.heappush(best, (loss[i], next(counter), (X[i], output[i])))
+                            heapq.heappush(best, (-loss[i], next(counter), (X[i], output[i])))
 
                         if len(worst) < 20:
                             heapq.heappush(worst, (-loss[i], next(counter), (X[i], output[i])))

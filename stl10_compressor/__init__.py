@@ -106,12 +106,11 @@ config = {
         }
     },
 
-    'lr': tune.choice([1e-3]),
-    'batch_size': tune.choice([512]),
-    'weight_decay': 5e-4,
+    'lr': tune.choice([1e-2]),
+    'batch_size': tune.choice([256]),
     'schdlr_patience': 3,
     'schdlr_factor': 0.5,
-    'epochs': 10,
+    'epochs': 100,
     'num_trials': 1,
 }
 

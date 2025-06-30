@@ -3,7 +3,11 @@ from torchvision.transforms import v2
 import torch
 
 train_transforms = v2.Compose([
-    v2.ToDtype(torch.float16, scale=True),
+    v2.RandomCrop(96, padding=4),
+    v2.ColorJitter(.5,.3),
+    v2.RandomEqualize(p=0.5),
+    v2.RandomHorizontalFlip(p=0.5),
+    v2.ToDtype(torch.float16, scale=True)
 ])
 
 test_transforms = v2.Compose([
