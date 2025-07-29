@@ -1,3 +1,7 @@
+## Notes
+
+- [Note](https://github.com/edwinsoftwaredev/ai-notebooks/blob/main/mpi3d_latent_gen/notes.ipynb)
+
 ## Citations
 
 ### Datasets
