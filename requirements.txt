@@ -11,3 +11,4 @@ huggingface_hub
 fsspec
 pyarrow
 graphviz
+gdown
