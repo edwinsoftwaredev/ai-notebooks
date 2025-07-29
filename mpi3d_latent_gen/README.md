@@ -1,7 +1,8 @@
 ## Citations
 
-### Dataset
-- @inproceedings{NEURIPS2019_d97d404b,
+### Datasets
+```
+@inproceedings{NEURIPS2019_d97d404b,
  author = {Gondal, Muhammad Waleed and Wuthrich, Manuel and Miladinovic, Djordje and Locatello, Francesco and Breidt, Martin and Volchkov, Valentin and Akpo, Joel and Bachem, Olivier and Sch\"{o}lkopf, Bernhard and Bauer, Stefan},
  booktitle = {Advances in Neural Information Processing Systems},
  editor = {H. Wallach and H. Larochelle and A. Beygelzimer and F. d\textquotesingle Alch\'{e}-Buc and E. Fox and R. Garnett},
@@ -12,6 +13,9 @@
  volume = {32},
  year = {2019}
 }
+
+```
+
 
 ### References
 - **Diederik P. Kingma and Max Welling (2019)**
