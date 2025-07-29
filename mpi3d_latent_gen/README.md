@@ -22,6 +22,5 @@
 
 
 ### References
-- **Diederik P. Kingma and Max Welling (2019)**
- *Diederik P. Kingma and Max Welling (2019), “An Introduction to
- Variational Autoencoders”, Foundations and Trends R in Machine Learning: Vol. xx, No. xx, pp 1–18. DOI: 10.1561/XXXXXXXXX.*.
+- **Diederik P. Kingma and Max Welling (2019)** *“An Introduction to
+ Variational Autoencoders”, Foundations and Trends® in Machine Learning: Vol. xx, No. xx, pp 1–18. DOI: 10.1561/XXXXXXXXX.*
