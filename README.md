@@ -8,3 +8,5 @@
 [CIFAR-10 Classifier](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/cifar10_classifier) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/cifar10)
 
 [STL-10 Compressor](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/stl10_compressor) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/stl10_compressor)
+
+[MPI3D Latent Generator](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/mpi3d_latent_gen) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/mpi3d_latent_gen)
