@@ -9,4 +9,6 @@
 
 [STL-10 Compressor](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/stl10_compressor) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/stl10_compressor)
 
-[MPI3D Latent Generator](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/mpi3d_latent_gen) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/mpi3d_latent_gen)
+[MPI3D VAE](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/mpi3d_latent_gen) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/mpi3d_latent_gen)
+
+[MPI3D WGAN-GP](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/mpi3d_gan) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/mpi3d_base_gan)
