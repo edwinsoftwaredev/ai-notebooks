@@ -27,7 +27,7 @@ class Run:
 
         self.scaler.unscale_(self.optimizer)
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=6000000)
 
         wandb.log({
             'grad_norm': grad_norm,

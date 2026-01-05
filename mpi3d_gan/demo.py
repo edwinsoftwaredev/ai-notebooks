@@ -8,7 +8,7 @@ import io
 
 import matplotlib.pyplot as plt
 
-from mpi3d_latent_gen.vae import VariationalAutoencoder
+from mpi3d_gan.gan import Generator
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -48,22 +48,20 @@ def plot_images(images):
 
 def demo(result, latent_dim, model_flag = False):
     if not model_flag:
-        model = VariationalAutoencoder(result.config['model_config'])
+        model = Generator(result.config['model_config']['generator'])
     
         model.to(device)
-    
+
         checkpoint_path = os.path.join(result.checkpoint.to_directory(), 'checkpoint.pt')
-        model_state, _optimizer_state = torch.load(checkpoint_path)
-        model.load_state_dict(model_state)
+        data = torch.load(checkpoint_path)
+        model.load_state_dict(data['generator'])
     
     else:
         model = result
 
 
     with torch.no_grad():
-        with torch.autocast(device_type=device.type, dtype=torch.float32):
-            z = torch.normal(0, 1, size=(20, latent_dim, 1, 1)).to(device=device, dtype=torch.float32)
-            mu, _log_var = model.decode(z)
-            mu = torch.tanh(mu).to(device=device, dtype=torch.float32)
+        z = torch.normal(0, 1, size=(20, latent_dim, 1, 1)).to(device=device, dtype=torch.float32)
+        output = model(z)
     
-    return plot_images(list(torch.unbind(mu, dim=0)))
+    return plot_images(list(torch.unbind(output, dim=0)))

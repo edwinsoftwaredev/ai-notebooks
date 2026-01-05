@@ -7,180 +7,62 @@ import wandb
 from mpi3d_latent_gen import demo
 from mpi3d_latent_gen.functions import train_model
 
-latent_dim = 10
+latent_dim = 7
 
 config = {
     'model_config': {
         'latent_dim': latent_dim,
-        
-        'encoder_output_shape': (256, 5, 5),
-        
-        'kl_cost_annealing_time': 75,
 
-        'encoder': {
-            'l01': {
-                'conv2d': {
-                    'in': 3,
-                    'out': 32,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([1]),
-                    'stride': tune.choice([1])   # <-- ((I + 2P - K) / S) + 1 = 64
-                }
-            },
-            'l02': {
-                'conv2d': {
-                    'in': 32,
-                    'out': 64,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([0]),
-                    'stride': tune.choice([1])  # 62
-                }
-            },
-            'l03': {
-                'conv2d': {
-                    'in': 64,
-                    'out': 64,
-                    'kernel': tune.choice([4]),
-                    'padding': tune.choice([0]),
-                    'stride': tune.choice([2])  # 30
-                }
-            },
-            'l04': {
-                'conv2d': {
-                    'in': 64,
-                    'out': 128,
-                    'kernel': tune.choice([4]),
-                    'padding': tune.choice([0]),
-                    'stride': tune.choice([2])  # 14
-                }
-            },
-            'l05': {
-                'conv2d': {
-                    'in': 128,
-                    'out': 256,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([0]),
-                    'stride': tune.choice([1])  # 12
-                }
-            },
-            'l06': {
-                'conv2d': {
-                    'in': 256,
-                    'out': 256,
-                    'kernel': tune.choice([4]),
-                    'padding': tune.choice([0]),
-                    'stride': tune.choice([2])  # 5
-                }
-            },
-        },
+        'encoder_output_shape': (512, 4, 4),
         
-        'decoder': {
-            'l01': {
-                'convT2d': {
-                    'in': 256,
-                    'out': 256,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([1]),
-                    'out_padding': tune.choice([0]),
-                    'stride': tune.choice([1]) # (I − 1) * S − 2*P + (K − 1) + output_padding + 1 = 5
-                }
-            },
-            'l02': {
-                'convT2d': {
-                    'in': 256,
-                    'out': 256,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([0]),
-                    'out_padding': tune.choice([1]),
-                    'stride': tune.choice([2]) # 12
-                }
-            },
-            'l03': {
-                'convT2d': {
-                    'in': 256,
-                    'out': 256,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([1]),
-                    'out_padding': tune.choice([0]),
-                    'stride': tune.choice([1]) # 12
-                }
-            },
-            'l04': {
-                'convT2d': {
-                    'in': 256,
-                    'out': 128,
-                    'kernel': tune.choice([4]),
-                    'padding': tune.choice([0]),
-                    'out_padding': tune.choice([1]),
-                    'stride': tune.choice([2]) # 27
-                }
-            },
-            'l05': {
-                'convT2d': {
-                    'in': 128,
-                    'out': 128,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([0]),
-                    'out_padding': tune.choice([1]),
-                    'stride': tune.choice([2]) # 56
-                }
-            },
-            'l06': {
-                'convT2d': {
-                    'in': 128,
-                    'out': 64,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([1]),
-                    'out_padding': tune.choice([0]),
-                    'stride': tune.choice([1]) # 56
-                }
-            },
-            'l07': {
-                'convT2d': {
-                    'in': 64,
-                    'out': 32,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([1]),
-                    'out_padding': tune.choice([0]),
-                    'stride': tune.choice([1]) # 56
-                }
-            },
-            'l08': {
-                'convT2d': {
-                    'in': 32,
-                    'out': 32,
-                    'kernel': tune.choice([4]),
-                    'padding': tune.choice([0]),
-                    'out_padding': tune.choice([0]),
-                    'stride': tune.choice([1]) # 59
-                }
-            },
-            'l09': {
-                'convT2d': {
-                    'in': 32,
-                    'out': 16,
-                    'kernel': tune.choice([4]),
-                    'padding': tune.choice([0]),
-                    'out_padding': tune.choice([0]),
-                    'stride': tune.choice([1]) # 62
-                }
-            },
-            'l10': {
-                'convT2d': {
-                    'in': 16,
-                    'out': 3,
-                    'kernel': tune.choice([3]),
-                    'padding': tune.choice([0]),
-                    'out_padding': tune.choice([0]),
-                    'stride': tune.choice([1]) # 64
-                },
-                'output': True
-            }
-        }
+        'kl_cost_annealing_time': 1,
+
+        # DCGAN architecture
+        'encoder': [
+            {'conv2d': {'in': 3, 'out': 64, 'kernel': tune.choice([4]), 'padding': 1, 'stride': 2, 'bias': True}}, # <-- ((I + 2P - K) / S) + 1 = 32
+            {'leakyRelu': {'nslope': 0.2, 'inplace': True}},
+            
+            {'conv2d': {'in': 64, 'out': 128, 'kernel': 4, 'padding': 1, 'stride': 2, 'bias': True}}, # 16
+            # {'layerNorm': { 'shape': [128, 16, 16], 'bias': True }},
+            {'leakyRelu': {'nslope': 0.2, 'inplace': True}},
+
+            {'conv2d': {'in': 128, 'out': 256, 'kernel': 4, 'padding': 1, 'stride': 2, 'bias': True}}, # 8
+            # {'layerNorm': { 'shape': [256, 8, 8], 'bias': True }},
+            {'leakyRelu': {'nslope': 0.2, 'inplace': True}},
+
+            {'conv2d': {'in': 256, 'out': 512, 'kernel': 4, 'padding': 1, 'stride': 2, 'bias': True}}, # 4
+            # {'layerNorm': { 'shape': [512, 4, 4], 'bias': True }},
+            {'leakyRelu': {'nslope': 0.2, 'inplace': True}},
+
+            # {'conv2d': {'in': 512, 'out': 1, 'kernel': 4, 'padding': 0, 'stride': 1, 'bias': False}}, # 1
+            # {'sigmoid': True}
+            # {'adaptativeAvgPool2d': {'output_size': 1}} # 1
+        ],
+
+        'decoder': [
+            {'convT2d': {'in': latent_dim, 'out': 512, 'kernel': tune.choice([4]), 'stride': 1, 'padding': 0, 'bias': True}}, # (I − 1)*S − 2*P + (K − 1) + output_padding + 1 = 4
+            # {'batchNorm2d': {'in': 512, 'bias': True }},
+            {'relu': {'inplace': True}},
+
+            {'convT2d': {'in': 512, 'out': 256, 'kernel': 4, 'stride': 2, 'padding': 1, 'bias': True}}, # 8
+            # {'batchNorm2d': {'in': 256, 'bias': True }},
+            {'relu': {'inplace': True}},
+
+            {'convT2d': {'in': 256, 'out': 128, 'kernel': 4, 'stride': 2, 'padding': 1, 'bias': True}}, # 16
+            # {'batchNorm2d': {'in': 128, 'bias': True }},
+            {'relu': {'inplace': True}},
+
+            {'convT2d': {'in': 128, 'out': 64, 'kernel': 4, 'stride': 2, 'padding': 1, 'bias': True}}, # 32
+            # {'batchNorm2d': {'in': 64, 'bias': True }},
+            {'relu': {'inplace': True}},
+
+            {'convT2d': {'in': 64, 'out': 3, 'kernel': 4, 'stride': 2, 'padding': 1, 'bias': True}}, # 64
+            # {'tanh': True},
+        ]
     },
 
-    'lr': tune.choice([1e-3]),
-    'batch_size': tune.choice([128]),
+    'lr': tune.choice([1e-4]),
+    'batch_size': tune.choice([64]),
     'schdlr_patience': 3,
     'schdlr_factor': 0.5,
     'epochs': 200,
