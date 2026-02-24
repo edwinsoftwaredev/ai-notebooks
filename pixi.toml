@@ -21,3 +21,10 @@ pyarrow = ">=23.0.0,<24"
 graphviz = ">=14.1.2,<15"
 gdown = ">=5.2.1,<6"
 ray-default = ">=2.53.0,<3"
+sentencepiece = ">=0.2.1,<0.3"
+
+[system-requirements]
+libc = { version = "2.42" }
+
+[pypi-dependencies]
+torch-xla = { version = ">=2.9.0, <3", extras = ["tpu"] }
