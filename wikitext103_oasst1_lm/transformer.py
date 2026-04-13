@@ -18,9 +18,9 @@ class Encoder(nn.Module):
         # in the encoder_layer
         self.norm = nn.LayerNorm(config["d_model"], eps=1e-6)
 
-    def forward(self, x, padding_mask):
+    def forward(self, x, enc_pad_mask):
         for layer in self.layers:
-            x = layer(x, padding_mask)
+            x = layer(x, enc_pad_mask)
 
         return self.norm(x)
 
@@ -37,9 +37,9 @@ class Decoder(nn.Module):
         # in the decoder_layer
         self.norm = nn.LayerNorm(config["d_model"], eps=1e-6)
 
-    def forward(self, x, encoder_out, dec_in_mask):
+    def forward(self, x, encoder_out, enc_pad_mask, dec_pad_mask, dec_causal_mask):
         for layer in self.layers:
-            x = layer(x, encoder_out, dec_in_mask)
+            x = layer(x, encoder_out, enc_pad_mask, dec_pad_mask, dec_causal_mask)
 
         return self.norm(x)
 
@@ -68,14 +68,26 @@ class Transformer(nn.Module):
 
         self._initialize_parameters()
 
-    def forward(self, enc_in, dec_in, enc_in_mask, dec_in_mask):
-        return self.decode(self.encode(enc_in, enc_in_mask), dec_in, dec_in_mask)
+    def forward(self, enc_in, dec_in, enc_pad_mask, dec_pad_mask, dec_causal_mask):
+        return self.decode(
+            self.encode(enc_in, enc_pad_mask),
+            dec_in,
+            enc_pad_mask,
+            dec_pad_mask,
+            dec_causal_mask,
+        )
 
-    def encode(self, source, enc_in_mask):
-        return self.encoder(self.encoder_input(source), enc_in_mask)
+    def encode(self, source, enc_pad_mask):
+        return self.encoder(self.encoder_input(source), enc_pad_mask)
 
-    def decode(self, enc_out, dec_in, dec_in_mask):
-        return self.decoder(self.decoder_input(dec_in), enc_out, dec_in_mask)
+    def decode(self, enc_out, dec_in, enc_pad_mask, dec_pad_mask, dec_causal_mask):
+        return self.decoder(
+            self.decoder_input(dec_in),
+            enc_out,
+            enc_pad_mask,
+            dec_pad_mask,
+            dec_causal_mask,
+        )
 
     def _initialize_parameters(self):
         for p in self.encoder.parameters():

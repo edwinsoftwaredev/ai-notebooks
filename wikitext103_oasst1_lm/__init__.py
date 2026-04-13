@@ -2,6 +2,7 @@ import os
 
 from wikitext103_oasst1_lm.datasets import WikitextDataset, load_wikitext_datasets
 from wikitext103_oasst1_lm.demo import wikitext_demo
+import math
 
 # Kaggle Config
 if "TPU_PROCESS_ADDRESSES" in os.environ:
@@ -15,7 +16,7 @@ if "LD_PRELOAD" in os.environ:
 
 os.environ["PJRT_DEVICE"] = "TPU"
 os.environ["PT_XLA_DEBUG"] = "0"
-os.environ["XLA_USE_BF16"] = "1"
+os.environ["XLA_USE_BF16"] = "0"
 
 import ray
 import sentencepiece as spm
@@ -79,23 +80,23 @@ config = {
             },
         },
         "d_model": D_MODEL,
-        "base_lr": 2.5e-4,
+        "base_lr": 5e-4 * (8**0.5),
         "beta1": 0.9,
         "beta2": 0.98,
-        "optim_eps": 1e-9,
+        "optim_eps": 1e-4,
         "schdlr_factor": 1,
-        "schdlr_warmup": 3000,
+        "schdlr_warmup": 7000,
         "lbl_smoothing": 0.1,
-        "max_steps": 250000,
+        "max_steps": 100000,
         "epochs": 10,
-        "batch_size": 8,
+        "batch_size": 16,
     },
     "num_trials": 1,
 }
 
 
 def demo():
-    wikitext_demo(config["model_config"], sp, "op9qmugy")
+    wikitext_demo(config["model_config"], sp, "8qfphg91")
 
 
 def train():

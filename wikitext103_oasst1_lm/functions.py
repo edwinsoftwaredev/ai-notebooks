@@ -94,12 +94,14 @@ def train_model(index, args):
     model = Transformer(config["transformer"])
     model.to(device)
 
+    xm.broadcast_master_param(model)
+
     optim = torch.optim.AdamW(
         model.parameters(),
         lr=config["base_lr"],
         betas=(config["beta1"], config["beta2"]),
         eps=config["optim_eps"],
-        weight_decay=1e-2,  # default
+        weight_decay=1e-2,  # 1e-2 default
     )
 
     # def lrate(step_num, d_model, factor, warmup_steps):
@@ -142,6 +144,7 @@ def train_model(index, args):
 
     if xm.is_master_ordinal(local=False):
         wandb.init(project="wikitext103_oasst1_lm", group="experiment_1", config=config)
+        wandb.watch(model, log="gradients")
 
     # if xm.is_master_ordinal(local=False):
     #     raytune_load_checkpoint(model, optim, lr_scheduler)

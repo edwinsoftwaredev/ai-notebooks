@@ -88,10 +88,12 @@ def load_wikitext_datasets():
     wikitext_datasets = _download_wikitext_parquets()
 
     train = (dd.read_parquet(wikitext_datasets[key]) for key in ["train1", "train2"])
-    train = [part for df in train for part in df.to_delayed()]
+    train = [wikitext_load_part(part) for df in train for part in df.to_delayed()]
 
     validation = (dd.read_parquet(wikitext_datasets[key]) for key in ["validation"])
-    validation = [part for df in validation for part in df.to_delayed()]
+    validation = [
+        wikitext_load_part(part) for df in validation for part in df.to_delayed()
+    ]
 
     return train, validation
 

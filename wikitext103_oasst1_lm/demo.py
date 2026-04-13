@@ -1,4 +1,3 @@
-from numpy import sort
 import torch
 import wandb
 from kaggle_secrets import UserSecretsClient  # pyright: ignore
@@ -18,7 +17,7 @@ def collate_batch(batch, tokenizer: SentencePieceProcessor):
     device = "cuda"
     src = []
     for seq in batch:
-        seq = tokenizer.Encode(seq, out_type=int, add_bos=True, add_eos=True)
+        seq = tokenizer.Encode(seq, out_type=int, add_bos=False, add_eos=False)
 
         if not 5 < len(seq) < 512:
             continue
@@ -122,26 +121,37 @@ def wikitext_demo(config, tokenizer: SentencePieceProcessor, run_id):
         for src in batch:
             # encoder input shape: (batch_size, seq_len)
             # last 50% tokens
-            prefix = src[: -(len(src) // 2)].unsqueeze(0)
+            prefix = torch.cat(
+                (
+                    src[: -(len(src) // 2)],
+                    torch.tensor([tokenizer.eos_id()], device=device, dtype=torch.long),
+                )
+            )
+            prefix = prefix.unsqueeze(0)
+            suffix = torch.tensor([tokenizer.bos_id()], device=device, dtype=torch.long)
+            suffix = suffix.unsqueeze(0)
+
+            enc_out = model.encode(prefix, None)
+
             with torch.no_grad():
                 for _ in range(max_seq_len):
-                    enc_out = model.encode(prefix, None)
-                    seq_len = prefix.size(-1)
+                    seq_len = suffix.size(-1)
                     ones = torch.ones((seq_len, seq_len), device=device)
-                    causal_mask = ~torch.triu(ones, diagonal=1).bool()
+                    causal_mask = torch.tril(ones, diagonal=0).bool()
                     causal_mask = causal_mask.unsqueeze(0)  # (1, seq_len, seq_len)
 
-                    dec_out = model.decode(enc_out, prefix, causal_mask)[:, -1, :]
+                    dec_out = model.decode(enc_out, suffix, None, causal_mask)[:, -1, :]
                     logits = model.generator(dec_out)  # (1, vocab_size)
                     # next_token = torch.argmax(logits, dim=-1, keepdim=True)
-                    logits = repetition_penalty(logits, prefix[0], 1.2)
+                    logits = repetition_penalty(logits, suffix[0], 1.2)
                     next_token = top_p_sampling(logits)
-                    prefix = torch.cat((prefix, next_token), dim=1)
+                    suffix = torch.cat((suffix, next_token), dim=1)
 
                     if next_token.item() == tokenizer.eos_id():
                         break
 
-            data.append(tokenizer.Decode([prefix.squeeze(0).tolist(), src.tolist()]))
+            seq = torch.cat((prefix, suffix), dim=1)
+            data.append(tokenizer.Decode([seq.squeeze(0).tolist(), src.tolist()]))
 
     wandb.log({"validation": wandb.Table(columns=["Output", "Target"], data=data)})
 

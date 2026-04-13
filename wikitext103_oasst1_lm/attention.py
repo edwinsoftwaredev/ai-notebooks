@@ -1,5 +1,6 @@
 import math
 import torch
+import torch.nn.functional as F
 
 
 def scaled_dot_product_attention(Q, K, V, mask=None, dropout=None):
@@ -23,7 +24,7 @@ def scaled_dot_product_attention(Q, K, V, mask=None, dropout=None):
         attn_score = attn_score.masked_fill(~mask, -math.inf)
 
     # Normalization
-    attn_score = torch.softmax(attn_score, dim=-1)
+    attn_score = F.softmax(attn_score, dim=-1)
 
     if dropout is not None:
         attn_score = dropout(attn_score)
