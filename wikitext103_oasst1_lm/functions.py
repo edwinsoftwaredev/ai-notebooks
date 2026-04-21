@@ -144,12 +144,19 @@ def train_model(index, args):
 
     if xm.is_master_ordinal(local=False):
         wandb.init(project="wikitext103_oasst1_lm", group="experiment_1", config=config)
-        wandb.watch(model, log="gradients")
+        # wandb.watch(model, log="all")
 
     # if xm.is_master_ordinal(local=False):
     #     raytune_load_checkpoint(model, optim, lr_scheduler)
 
-    run = Run(model, optim, lr_scheduler, loss_fn, config["batch_size"])
+    run = Run(
+        model,
+        optim,
+        lr_scheduler,
+        loss_fn,
+        config["batch_size"],
+        config["grad_acc_steps"],
+    )
 
     train_set, validation_set = args["datasets"]
 

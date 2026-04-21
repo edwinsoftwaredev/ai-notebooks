@@ -16,7 +16,7 @@ if "LD_PRELOAD" in os.environ:
 
 os.environ["PJRT_DEVICE"] = "TPU"
 os.environ["PT_XLA_DEBUG"] = "0"
-os.environ["XLA_USE_BF16"] = "0"
+os.environ["XLA_USE_BF16"] = "1"
 
 import ray
 import sentencepiece as spm
@@ -33,6 +33,7 @@ N = 6
 H = 12
 DROPOUT = 0.1
 D_FF = 3072  # Position-wise FFN params
+GRAD_ACC_STEPS = 10
 
 config = {
     "model_config": {
@@ -83,13 +84,14 @@ config = {
         "base_lr": 5e-4 * (8**0.5),
         "beta1": 0.9,
         "beta2": 0.98,
-        "optim_eps": 1e-4,
+        "optim_eps": 5e-5,
         "schdlr_factor": 1,
-        "schdlr_warmup": 7000,
+        "schdlr_warmup": 7500 // GRAD_ACC_STEPS,
         "lbl_smoothing": 0.1,
-        "max_steps": 100000,
-        "epochs": 10,
-        "batch_size": 16,
+        "grad_acc_steps": GRAD_ACC_STEPS,
+        "max_steps": 94000 // GRAD_ACC_STEPS,
+        "epochs": 20,
+        "batch_size": 32,
     },
     "num_trials": 1,
 }

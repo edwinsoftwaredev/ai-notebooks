@@ -52,12 +52,14 @@ class Run:
         scheduler: torch.optim.lr_scheduler.SequentialLR,
         loss_fn,
         batch_size,
+        grad_acc_steps,
     ):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.batch_size = batch_size
         self.loss_fn = loss_fn
+        self.grad_acc_steps = grad_acc_steps
 
         # if xm.is_master_ordinal(local=False):
         #     layers, grads = get_all_layers(self.model, hook_forward, hook_backward)
@@ -70,18 +72,29 @@ class Run:
         # target: (batch_size, seq_len) -> (batch_size * seq_len)
         return self.loss_fn(logits.view(-1, logits.size(-1)), target.view(-1))
 
-    def backprop(self, loss):
+    def backprop(self, loss, step, is_last_batch):
         loss.backward()
-        # TODO: accumulate gradients before optimizer step
-        xm.optimizer_step(self.optimizer)
+
+        if (step + 1) % self.grad_acc_steps == 0 or is_last_batch:
+            xm.optimizer_step(self.optimizer)
+            self.optimizer.zero_grad(set_to_none=True)
+            self.scheduler.step()
 
     def train(self, dataloader: MpDeviceLoader, epoch):
         def log_loss(step, loss, loss_type, lr):
-            wandb.log({f"{loss_type}": loss.item(), "step": step, "lr": lr[0]})
+            wandb.log(
+                {
+                    f"{loss_type}": loss.item() * self.grad_acc_steps,
+                    "step": step,
+                    "lr": lr[0],
+                }
+            )
+
+        n = len(dataloader)
+        remainder = n % self.grad_acc_steps
 
         self.model.train()
         for step, batch in enumerate(dataloader):
-            self.optimizer.zero_grad(set_to_none=True)
             x = (
                 batch.enc_in,
                 batch.dec_in,
@@ -90,11 +103,19 @@ class Run:
                 batch.dec_causal_mask,
             )
 
-            loss = self.loss(x, batch.target)
-            self.backprop(loss)
-            self.scheduler.step()
+            is_last_batch = step + 1 == n
+            divisor = (
+                self.grad_acc_steps
+                if not (is_last_batch and remainder != 0)
+                else remainder
+            )
 
-            if step % 100 == 0 and xm.is_master_ordinal(local=False):
+            loss = self.loss(x, batch.target)
+            loss = loss / divisor
+
+            self.backprop(loss, step, is_last_batch)
+
+            if (step + 1) % 100 == 0 and xm.is_master_ordinal(local=False):
                 # These operations require TPU and CPU to communicate
                 xm.add_step_closure(
                     log_loss,
