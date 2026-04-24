@@ -9,7 +9,7 @@ class EncoderLayer(nn.Module):
 
         # Multi-Head Attention sublayer
         mha_conf = config["multihead_attn"]
-        self.self_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-6)
+        self.self_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-4)
         self.self_attn = nn.MultiheadAttention(
             mha_conf["d_model"],
             mha_conf["h"],
@@ -18,7 +18,7 @@ class EncoderLayer(nn.Module):
         )
 
         # Position-wise FFN sublayer
-        self.ffn_ln = nn.LayerNorm(config["d_model"], eps=1e-6)
+        self.ffn_ln = nn.LayerNorm(config["d_model"], eps=1e-4)
         self.ffn = PositionWiseFFN(config["ffn"])
         self.ffn_dropout = nn.Dropout(p=config["dropout"])
 

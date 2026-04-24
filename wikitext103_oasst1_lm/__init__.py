@@ -1,5 +1,7 @@
 import os
 
+from torch_xla import step
+
 from wikitext103_oasst1_lm.datasets import WikitextDataset, load_wikitext_datasets
 from wikitext103_oasst1_lm.demo import wikitext_demo
 import math
@@ -16,7 +18,7 @@ if "LD_PRELOAD" in os.environ:
 
 os.environ["PJRT_DEVICE"] = "TPU"
 os.environ["PT_XLA_DEBUG"] = "0"
-os.environ["XLA_USE_BF16"] = "1"
+os.environ["XLA_USE_BF16"] = "0"
 
 import ray
 import sentencepiece as spm
@@ -33,7 +35,15 @@ N = 6
 H = 12
 DROPOUT = 0.1
 D_FF = 3072  # Position-wise FFN params
-GRAD_ACC_STEPS = 10
+
+GRAD_ACC_STEPS = 8
+EPOCHS = 5
+DS = 1.2e6
+BATCH_SIZE = 8
+DEVICE_COUNT = 8
+
+DS_PER_DEVICE = DS // (BATCH_SIZE * DEVICE_COUNT)
+STEPS = DS_PER_DEVICE * EPOCHS
 
 config = {
     "model_config": {
@@ -81,17 +91,17 @@ config = {
             },
         },
         "d_model": D_MODEL,
-        "base_lr": 5e-4 * (8**0.5),
+        "base_lr": 2.5e-4 * (DEVICE_COUNT**0.5),
         "beta1": 0.9,
         "beta2": 0.98,
-        "optim_eps": 5e-5,
+        "optim_eps": 1e-6,
         "schdlr_factor": 1,
-        "schdlr_warmup": 7500 // GRAD_ACC_STEPS,
+        "schdlr_warmup": (STEPS * 0.002) // GRAD_ACC_STEPS,
         "lbl_smoothing": 0.1,
         "grad_acc_steps": GRAD_ACC_STEPS,
-        "max_steps": 94000 // GRAD_ACC_STEPS,
-        "epochs": 20,
-        "batch_size": 32,
+        "max_steps": STEPS // GRAD_ACC_STEPS,
+        "epochs": EPOCHS,
+        "batch_size": BATCH_SIZE,
     },
     "num_trials": 1,
 }

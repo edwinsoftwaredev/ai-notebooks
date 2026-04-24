@@ -8,7 +8,7 @@ class DecoderLayer(nn.Module):
         super().__init__()
         # Masked Multi-Head Attention sublayer
         mha_conf = config["masked_multihead_attn"]
-        self.masked_self_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-6)
+        self.masked_self_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-4)
         self.masked_self_attn = nn.MultiheadAttention(
             mha_conf["d_model"],
             mha_conf["h"],
@@ -20,7 +20,7 @@ class DecoderLayer(nn.Module):
 
         # Multi-Head Attention sublayer (cross-attention encoder-decoder)
         mha_conf = config["multihead_attn"]
-        self.cross_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-6)
+        self.cross_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-4)
         self.cross_attn = nn.MultiheadAttention(
             mha_conf["d_model"],
             mha_conf["h"],
@@ -29,22 +29,12 @@ class DecoderLayer(nn.Module):
         )
 
         # Position-Wise FFN sublayer
-        self.ffn_ln = nn.LayerNorm(config["d_model"], eps=1e-6)
+        self.ffn_ln = nn.LayerNorm(config["d_model"], eps=1e-4)
         self.ffn = PositionWiseFFN(config["ffn"])
         self.ffn_dropout = nn.Dropout(p=config["dropout"])
 
     def forward(self, x, encoder_out, enc_pad_mask, dec_pad_mask, causal_mask):
         residual_connection = x
-
-        # causal_mask = (
-        #     causal_mask.unsqueeze(1)
-        #     .repeat(1, self.num_heads, 1, 1)
-        #     .reshape(
-        #         causal_mask.size(0) * self.num_heads,
-        #         causal_mask.size(-2),
-        #         causal_mask.size(-1),
-        #     )
-        # )
 
         # Pre-LN masked multi-head attention
         x = self.masked_self_attn_ln(x)
