@@ -1,3 +1,6 @@
+from typing import cast
+
+import pandas as pd
 from dask import dataframe as dd
 from dask.delayed import delayed
 from huggingface_hub import hf_hub_download
@@ -49,8 +52,22 @@ def oasst1_load_part(partition):
 
 
 @delayed
-def oasst1_make_conversation(partition):
-    pass
+def oasst1_make_qa(partition: pd.DataFrame):
+    left = pd.pivot(
+        partition, index=["parent_id", "message_id"], columns="role", values="text"
+    )
+    right = pd.pivot(
+        cast(pd.DataFrame, partition[["message_id", "text", "role"]]),
+        index="message_id",
+        columns="role",
+        values="text",
+    )
+    df = left.join(right, on="parent_id", how="inner", rsuffix="_r")
+    df["prompter"] = cast(pd.Series, df["prompter"]).combine_first(df["prompter_r"])
+    df.drop(columns=["assistant_r", "prompter_r"], inplace=True)
+    df = df[df["assistant"].notna()]
+    df.reset_index(drop=True, inplace=True)
+    return df
 
 
 @delayed
@@ -96,6 +113,37 @@ def load_wikitext_datasets():
     ]
 
     return train, validation
+
+
+def load_oasst1_datasets():
+    oasst1_datasets = _download_oasst1_parquets()
+    train = (dd.read_parquet(oasst1_datasets[key]) for key in ["train"])
+    train = (oasst1_load_part(df) for ddf in train for df in ddf.to_delayed())
+    train = [oasst1_make_qa(df) for df in train]
+
+    validation = (dd.read_parquet(oasst1_datasets[key]) for key in ["validation"])
+    validation = (oasst1_load_part(df) for ddf in validation for df in ddf.to_delayed())
+    validation = [oasst1_make_qa(df) for df in validation]
+
+    return train, validation
+
+
+class OasstDataset(Dataset):
+    def __init__(self, dfs):
+        self.pd_series = [df for df in dfs]
+        self.total_len = sum(len(series) for series in self.pd_series)
+
+    def __len__(self):
+        return self.total_len
+
+    def __getitem__(self, idx):
+        for series in self.pd_series:
+            if idx < len(series):
+                return series.iloc[idx]
+
+            idx -= len(series)
+
+        raise IndexError(f"Index {idx} out of range")
 
 
 class WikitextDataset(Dataset):

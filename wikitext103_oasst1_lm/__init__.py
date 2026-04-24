@@ -33,7 +33,7 @@ N = 6
 H = 12
 DROPOUT = 0.1
 D_FF = 3072  # Position-wise FFN params
-GRAD_ACC_STEPS = 10
+GRAD_ACC_STEPS = 8
 
 config = {
     "model_config": {
@@ -84,14 +84,14 @@ config = {
         "base_lr": 5e-4 * (8**0.5),
         "beta1": 0.9,
         "beta2": 0.98,
-        "optim_eps": 5e-5,
+        "optim_eps": 5e-6,
         "schdlr_factor": 1,
-        "schdlr_warmup": 7500 // GRAD_ACC_STEPS,
+        "schdlr_warmup": 30000 // GRAD_ACC_STEPS,
         "lbl_smoothing": 0.1,
         "grad_acc_steps": GRAD_ACC_STEPS,
-        "max_steps": 94000 // GRAD_ACC_STEPS,
-        "epochs": 20,
-        "batch_size": 32,
+        "max_steps": 375000 // GRAD_ACC_STEPS,
+        "epochs": 10,
+        "batch_size": 8,
     },
     "num_trials": 1,
 }
