@@ -13,20 +13,21 @@ from mpi3d_gan.image_dataset import ImageDataset
 
 dir_path = "/kaggle/working/content/MPI3D"
 
+
 def _download_dataset():
     if Path(dir_path).is_dir():
         return
-    
+
     os.makedirs(dir_path, exist_ok=True)
 
-    URL = f'https://drive.google.com/uc?id=1Tp8eTdHxgUMtsZv5uAoYAbJR1BOa_OQm'
+    URL = "https://drive.google.com/uc?id=1Tp8eTdHxgUMtsZv5uAoYAbJR1BOa_OQm"
 
     filename = f"{dir_path}/real3d_complicated_shapes_ordered.npz"
 
     gdown.download(URL, filename, quiet=False)
 
     data = np.load(filename, allow_pickle=False)
-    data = data['images']   # [N, H, W, C]
+    data = data["images"]  # [N, H, W, C]
 
     da = dda.from_array(data, chunks=(50000, 64, 64, 3))
 
@@ -40,13 +41,13 @@ def _download_dataset():
         seed = randint(100, 200)
         rng = np.random.RandomState(seed)
         return df.assign(_rand=rng.rand(len(df)))
-    
+
     # Assign a _rand column in each partition with a different seed
     ddf = ddf.map_partitions(add_random_col)
 
     ddf = ddf.shuffle(ddf.columns[-1], ignore_index=True)
 
-    ddf = ddf.drop(columns=['_rand'])
+    ddf = ddf.drop(columns=["_rand"])
 
     ddf.to_parquet(f"{dir_path}/", engine="pyarrow", write_index=False)
 
@@ -54,21 +55,24 @@ def _download_dataset():
 
 
 def load_datasets():
-
     @delayed
     def partitions_to_datasets(partition, train):
         partition = partition.to_numpy()
         partition = partition.reshape((partition.shape[0], 64, 64, 3))
         return ImageDataset(partition, train)
-    
+
     ddf = dd.read_parquet(dir_path)
 
     ddf, _ = ddf.random_split([0.3, 0.7], random_state=124, shuffle=False)
 
     train_set, test_set = ddf.random_split([1, 0], random_state=123, shuffle=True)
 
-    train_datasets = [partitions_to_datasets(partition, True) for partition in train_set.to_delayed()]
-    test_datasets = [partitions_to_datasets(partition, False) for partition in test_set.to_delayed()]
+    train_datasets = [
+        partitions_to_datasets(partition, True) for partition in train_set.to_delayed()
+    ]
+    test_datasets = [
+        partitions_to_datasets(partition, False) for partition in test_set.to_delayed()
+    ]
 
     # dataset fits in memory
     train_datasets = [partition.compute() for partition in train_datasets]

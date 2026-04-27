@@ -2,4 +2,6 @@
 desktop.ini
 cifar10_classifier/content
 
-__pycache__
+__pycache__# pixi environments
+.pixi/*
+!.pixi/config.toml
