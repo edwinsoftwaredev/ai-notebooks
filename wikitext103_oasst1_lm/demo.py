@@ -4,8 +4,13 @@ from kaggle_secrets import UserSecretsClient  # pyright: ignore
 from sentencepiece import SentencePieceProcessor
 from torch.utils.data import DataLoader
 
-from wikitext103_oasst1_lm.datasets import WikitextDataset, load_wikitext_datasets
-from wikitext103_oasst1_lm.transformer import Transformer
+from wikitext103_oasst1_lm.causal_transformer import Transformer
+from wikitext103_oasst1_lm.datasets import (
+    OasstDataset,
+    WikitextDataset,
+    load_oasst1_datasets,
+    load_wikitext_datasets,
+)
 
 user_secrets = UserSecretsClient()
 secret_value_0 = user_secrets.get_secret("WANDB_API_KEY")
@@ -13,7 +18,7 @@ secret_value_0 = user_secrets.get_secret("WANDB_API_KEY")
 wandb.login(key=secret_value_0)
 
 
-def collate_batch(batch, tokenizer: SentencePieceProcessor):
+def wikitext_collate_batch(batch, tokenizer: SentencePieceProcessor):
     device = "cuda"
     src = []
     for seq in batch:
@@ -33,10 +38,9 @@ def collate_batch(batch, tokenizer: SentencePieceProcessor):
     return src
 
 
-def collate_fn(tokenizer):
-
+def wikitext_collate_fn(tokenizer):
     def collate(batch):
-        return collate_batch(batch, tokenizer)
+        return wikitext_collate_batch(batch, tokenizer)
 
     return collate
 
@@ -101,6 +105,7 @@ def wikitext_demo(config, tokenizer: SentencePieceProcessor, run_id):
     device = "cuda"
     model = Transformer(config["transformer"])
     checkpoint = torch.load("model_checkpoint.pt", map_location=device)
+
     model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
@@ -108,7 +113,7 @@ def wikitext_demo(config, tokenizer: SentencePieceProcessor, run_id):
     _, valid_set = load_wikitext_datasets()
 
     valid_ds = WikitextDataset((part.compute() for part in valid_set))
-    valid_dl = DataLoader(valid_ds, 32, True, collate_fn=collate_fn(tokenizer))
+    valid_dl = DataLoader(valid_ds, 32, True, collate_fn=wikitext_collate_fn(tokenizer))
 
     # wandb table
     data = []
@@ -121,38 +126,124 @@ def wikitext_demo(config, tokenizer: SentencePieceProcessor, run_id):
         for src in batch:
             # encoder input shape: (batch_size, seq_len)
             # last 50% tokens
-            prefix = torch.cat(
+            seq = torch.cat(
                 (
-                    src[: -(len(src) // 2)],
-                    torch.tensor([tokenizer.eos_id()], device=device, dtype=torch.long),
+                    torch.tensor([tokenizer.bos_id()], device=device, dtype=torch.long),
+                    src[: (len(src) // 2)],
                 )
-            )
-            prefix = prefix.unsqueeze(0)
-            suffix = torch.tensor([tokenizer.bos_id()], device=device, dtype=torch.long)
-            suffix = suffix.unsqueeze(0)
-
-            enc_out = model.encode(prefix, None)
+            ).unsqueeze(0)
 
             with torch.no_grad():
                 for _ in range(max_seq_len):
-                    seq_len = suffix.size(-1)
+                    seq_len = seq.size(-1)
                     ones = torch.ones((seq_len, seq_len), device=device)
-                    causal_mask = torch.tril(ones, diagonal=0).bool()
-                    causal_mask = causal_mask.unsqueeze(0)  # (1, seq_len, seq_len)
+                    causal_mask = torch.triu(ones, diagonal=1).bool()
 
-                    dec_out = model.decode(enc_out, suffix, None, causal_mask)[:, -1, :]
+                    dec_out = model(seq, None, causal_mask)[:, -1, :]
                     logits = model.generator(dec_out)  # (1, vocab_size)
-                    # next_token = torch.argmax(logits, dim=-1, keepdim=True)
-                    logits = repetition_penalty(logits, suffix[0], 1.2)
+                    logits = repetition_penalty(logits, seq[0], 1.2)
                     next_token = top_p_sampling(logits)
-                    suffix = torch.cat((suffix, next_token), dim=1)
+                    seq = torch.cat((seq, next_token), dim=1)
 
                     if next_token.item() == tokenizer.eos_id():
                         break
 
-            seq = torch.cat((prefix, suffix), dim=1)
             data.append(tokenizer.Decode([seq.squeeze(0).tolist(), src.tolist()]))
 
     wandb.log({"validation": wandb.Table(columns=["Output", "Target"], data=data)})
+
+    wandb.finish()
+
+
+USER_TOKEN = "<user>"
+ASSISTANT_TOKEN = "<assistant>"
+SEP_TOKEN = "<sep>"
+
+
+def oasst_collate_batch(batch, tokenizer: SentencePieceProcessor):
+    device, src = "cuda", []
+
+    for seq in batch:
+        assistant = seq["assistant"]
+        prompter = (
+            [tokenizer.bos_id(), tokenizer.PieceToId(USER_TOKEN)]
+            + seq["prompter"]
+            + [tokenizer.PieceToId(SEP_TOKEN), tokenizer.PieceToId(ASSISTANT_TOKEN)]
+        )
+
+        seq = torch.tensor(
+            prompter,
+            dtype=torch.long,
+            device=device,
+        )
+
+        src.append((seq, assistant))
+
+    return src
+
+
+def oasst_collate_fn(tokenizer):
+
+    def collate(batch):
+        return oasst_collate_batch(batch, tokenizer)
+
+    return collate
+
+
+def oasst_demo(config, tokenizer: SentencePieceProcessor, run_id):
+    wandb.init(
+        project="wikitext103_oasst1_lm",
+        group="experiment_1",
+        config=config,
+        resume="allow",
+        id=run_id,
+    )
+
+    device = "cuda"
+    model = Transformer(config["transformer"])
+    checkpoint = torch.load("fine_tuned_model_checkpoint.pt", map_location=device)
+
+    model.load_state_dict(checkpoint)
+    model.to(device)
+    model.eval()
+
+    _, valid_set = load_oasst1_datasets()
+
+    valid_ds = OasstDataset((part.compute() for part in valid_set))
+    valid_dl = DataLoader(valid_ds, 32, True, collate_fn=oasst_collate_fn(tokenizer))
+
+    # wandb table
+    data = []
+
+    max_seq_len = 512
+    for step, batch in enumerate(valid_dl):
+        if step == 10:
+            break
+
+        for src in batch:
+            seq = src[0].unsqueeze(0)
+
+            with torch.no_grad():
+                for _ in range(max_seq_len):
+                    seq_len = seq.size(-1)
+                    ones = torch.ones((seq_len, seq_len), device=device)
+                    causal_mask = torch.triu(ones, diagonal=1).bool()
+
+                    dec_out = model(seq, None, causal_mask)[:, -1, :]
+                    logits = model.generator(dec_out)  # (1, vocab_size)
+                    logits = repetition_penalty(logits, seq[0], 1.2)
+                    next_token = top_p_sampling(logits)
+                    seq = torch.cat((seq, next_token), dim=1)
+
+                    if next_token.item() == tokenizer.eos_id():
+                        break
+
+            seq = tokenizer.Decode(seq.squeeze(0).tolist())
+            seq = seq.split("<sep>")
+            data.append(seq + [tokenizer.Decode(src[1])])
+
+    wandb.log(
+        {"validation": wandb.Table(columns=["Question", "Output", "Target"], data=data)}
+    )
 
     wandb.finish()

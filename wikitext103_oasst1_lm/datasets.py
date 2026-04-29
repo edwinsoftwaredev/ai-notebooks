@@ -1,3 +1,4 @@
+import re
 from typing import cast
 
 import pandas as pd
@@ -53,6 +54,11 @@ def oasst1_load_part(partition):
 
 @delayed
 def oasst1_make_qa(partition: pd.DataFrame):
+    import sentencepiece as spm
+
+    tokenizer = spm.SentencePieceProcessor()
+    tokenizer.Load("/kaggle/working/ai-notebooks/m.model")
+
     left = pd.pivot(
         partition, index=["parent_id", "message_id"], columns="role", values="text"
     )
@@ -67,11 +73,68 @@ def oasst1_make_qa(partition: pd.DataFrame):
     df.drop(columns=["assistant_r", "prompter_r"], inplace=True)
     df = df[df["assistant"].notna()]
     df.reset_index(drop=True, inplace=True)
+
+    df["prompter"] = df["prompter"].apply(lambda x: tokenizer.Encode(x, out_type=int))  # pyright: ignore
+    df["assistant"] = df["assistant"].apply(lambda x: tokenizer.Encode(x, out_type=int))  # pyright: ignore
+
+    df = df[(df["prompter"].apply(len) + df["assistant"].apply(len)) <= 512]  # pyright: ignore
+
     return df
+
+
+def clean_wikitext(text):
+    if not isinstance(text, str):
+        return ""
+
+    text = text.strip()
+
+    # Fix hyphens
+    text = text.replace(" @-@ ", "-")
+
+    # Fix quantities
+    text = text.replace(" @,@ ", ",")
+    text = text.replace(" @.@ ", ".")
+    text = re.sub(r"([$€£]+)\s+([0-9])", r"\1\2", text)
+
+    # Normalize quotes
+    text = text.replace("“", '"').replace("”", '"').replace("’", "'")
+
+    # Remove excess spaces
+    text = re.sub(r"\s+", " ", text)  # collapse multiple spaces
+
+    # possessive w's, w 's, w' s, w ' s, w 'w
+    text = re.sub(r"(\w+)\s+('\w+)", r"\1\2", text)  # contraction
+    text = re.sub(r"(\w+)\s+('\s*s)\s+", r"\1's ", text)
+    text = re.sub(r"(\w+?s)\s+'\s+", r"\1' ", text)
+    text = re.sub(r"(\w+')\s+s\s+", r"\1s ", text)
+
+    # punctuation
+    text = re.sub(r"\s+([,.!?;:])\s+", r"\1 ", text)  # remove space before punctuation
+    text = re.sub(r"\s+([,.!?;:])", r"\1", text)  # "etc. , " and final period case
+    text = re.sub(r"(\d)\s*:\s*(\d)", r"\1:\2", text)  # time
+    text = re.sub(r"(\d)\s*%", r"\1%", text)
+
+    # enclosings (this does not handle '')
+    text = re.sub(r"\(\s*(.+?)\s*\)", r"(\1)", text)
+    text = re.sub(r'"\s*(.+?)\s*"', r'"\1"', text)
+    text = re.sub(r"\[\s*(.+?)\s*\]", r"[\1]", text)
+
+    text = re.sub(r"(^|\s+)'\s+(.+?)\s+'(\s+|$)", r"\1'\2'\3", text)
+
+    # Remove headers markups
+    text = re.sub(r"=(\s*=)*(.+?)=(\s*=)*", r"\2", text)
+
+    # Remove wiki markup
+    text = text.replace(" / ", "/")
+    text = re.sub(r"\[\d+\]", "", text)  # numeric references
+    text = re.sub(r"<ref>.*?</ref>", "", text, flags=re.DOTALL)  # ref tags
+
+    return text.strip()
 
 
 @delayed
 def wikitext_load_part(partition):
+    partition["text"] = partition["text"].map(clean_wikitext)
     return partition[partition["text"].str.len() > 0]
 
 

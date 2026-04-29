@@ -9,11 +9,11 @@ class PositionWiseFFN(nn.Module):
         d_ff = config["d_ff"]
         dropout = config["dropout"]
 
+        self.out_proj = nn.Linear(d_ff, d_model)
+        self.out_proj._is_residual = True  # pyright: ignore
+
         self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(d_ff, d_model),
+            nn.Linear(d_model, d_ff), nn.GELU(), nn.Dropout(dropout), self.out_proj
         )
 
     def forward(self, x):
