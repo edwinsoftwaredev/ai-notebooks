@@ -12,3 +12,5 @@
 [MPI3D VAE](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/mpi3d_latent_gen) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/mpi3d_latent_gen)
 
 [MPI3D WGAN-GP](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/mpi3d_gan) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/mpi3d_base_gan)
+
+[Wikitext-103 OASST1 LM](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/wikitext103_oasst1_lm) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/wikitext103_oasst1_lm)
