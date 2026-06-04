@@ -1,47 +1,10 @@
 import torch
 import torch_xla.core.xla_model as xm
 import wandb
-from torch import nn
 from torch_xla import runtime as xr
 from torch_xla.distributed.parallel_loader import MpDeviceLoader
 
-from wikitext103_oasst1_lm.transformer import Transformer
-
-
-def hook_forward(module_name, grads, hook_backward):
-    def hook(module, args, output):
-        output.register_hook(hook_backward(module_name, grads))
-
-    return hook
-
-
-def hook_backward(module_name, grads):
-    def hook(grad):
-        grads.append((module_name, grad))
-
-    return hook
-
-
-def get_all_layers(model: nn.Module, hook_forward, hook_backward):
-    layers = dict()
-    grads = []
-    for name, layer in model.named_modules():
-        # skip Sequential and/or wrapper modules
-        if any(layer.children()) is False:
-            layers[layer] = name
-            layer.register_forward_hook(hook_forward(name, grads, hook_backward))
-    return layers, grads
-
-
-def get_grads(grads):
-    layer_idx = []
-    avg_grads = []
-    for idx, (name, grad) in enumerate(grads):
-        if grad is not None:
-            avg_grad = grad.abs().mean()
-            avg_grads.append(avg_grad)
-            layer_idx.append(len(grads) - 1 - idx)
-    return layer_idx, avg_grads
+from wikitext103_oasst1_lm.causal_transformer import Transformer
 
 
 class Run:
@@ -61,11 +24,6 @@ class Run:
         self.loss_fn = loss_fn
         self.grad_acc_steps = grad_acc_steps
 
-        # if xm.is_master_ordinal(local=False):
-        #     layers, grads = get_all_layers(self.model, hook_forward, hook_backward)
-        #     self.layers = layers
-        #     self.grads = grads
-
     def loss(self, x, target):
         logits = self.model.generator(self.model(*x))
         # source: (batch_size, seq_len, vocab_size) -> (batch_size * seq_len, vocab_size)
@@ -73,9 +31,43 @@ class Run:
         return self.loss_fn(logits.view(-1, logits.size(-1)), target.view(-1))
 
     def backprop(self, loss, step, is_last_batch):
+        # def log_grads(step, ratios, norms):
+        #     if xm.is_master_ordinal(local=False):
+        #         wandb.log(
+        #             {
+        #                 "grad_ratio": {k: v.item() for k, v in ratios.items()},
+        #                 "grad_norm": {k: v.item() for k, v in norms.items()},
+        #                 "step": step,
+        #             },
+        #         )
+
         loss.backward()
 
         if (step + 1) % self.grad_acc_steps == 0 or is_last_batch:
+            # ratios = {}
+            # norms = {}
+
+            # for name, p in self.model.named_parameters():
+            #     if p.grad is None:
+            #         continue
+
+            #     grad_sq = (p.grad.detach() ** 2).sum()
+            #     weight_sq = (p.detach() ** 2).sum()
+
+            #     grad_sq = xm.mesh_reduce(f"{name}_g", grad_sq, lambda xs: sum(xs))
+            #     weight_sq = xm.mesh_reduce(f"{name}_w", weight_sq, lambda xs: sum(xs))
+
+            #     grad_norm = torch.sqrt(grad_sq)  # pyright: ignore
+            #     weight_norm = torch.sqrt(weight_sq + 1e-12)  # pyright: ignore
+
+            #     norms[name] = grad_norm
+            #     ratios[name] = grad_norm / weight_norm
+
+            # xm.add_step_closure(
+            #     log_grads,
+            #     (step, ratios, norms),
+            # )
+
             xm.optimizer_step(self.optimizer)
             self.optimizer.zero_grad(set_to_none=True)
             self.scheduler.step()
@@ -96,9 +88,7 @@ class Run:
         self.model.train()
         for step, batch in enumerate(dataloader):
             x = (
-                batch.enc_in,
                 batch.dec_in,
-                batch.enc_pad_mask,
                 batch.dec_pad_mask,
                 batch.dec_causal_mask,
             )
@@ -130,9 +120,7 @@ class Run:
         with torch.no_grad():
             for step, batch in enumerate(dataloader):
                 x = (
-                    batch.enc_in,
                     batch.dec_in,
-                    batch.enc_pad_mask,
                     batch.dec_pad_mask,
                     batch.dec_causal_mask,
                 )

@@ -10,11 +10,8 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torch_xla import runtime as xr
 
 from wikitext103_oasst1_lm.causal_transformer import Transformer
-from wikitext103_oasst1_lm.collate_batch import wikitext_collate_batch
-from wikitext103_oasst1_lm.datasets import (
-    WikitextDataset,
-    load_wikitext_datasets,
-)
+from wikitext103_oasst1_lm.collate_batch import oasst_collate_batch
+from wikitext103_oasst1_lm.datasets import OasstDataset, load_oasst1_datasets
 from wikitext103_oasst1_lm.run import Run
 
 user_secrets = UserSecretsClient()
@@ -27,30 +24,30 @@ tokenizer.Load("/kaggle/working/ai-notebooks/m.model")
 
 
 def collate_fn(batch):
-    return wikitext_collate_batch(batch, tokenizer)
+    return oasst_collate_batch(batch, tokenizer)
 
 
 def tpu_train(config):
-
-    train_set, validation_set = load_wikitext_datasets()
+    train_set, validation_set = load_oasst1_datasets()
 
     # Do not compute partitions when using WikitextIterDataset
     train_set = [part.compute() for part in train_set]
     validation_set = [part.compute() for part in validation_set]
 
-    train_set = WikitextDataset(train_set)
-    validation_set = WikitextDataset(validation_set)
+    train_set = OasstDataset(train_set)
+    validation_set = OasstDataset(validation_set)
 
     args = {"config": config, "datasets": (train_set, validation_set)}
 
-    return torch_xla.launch(train_model, args=(args,))
+    return torch_xla.launch(train, args=(args,), debug_single_process=True)
 
 
-def train_model(index, args):
+def train(index, args):
     config = args["config"]
-
     device = torch_xla.device()
     model = Transformer(config["transformer"])
+    checkpoint = torch.load("model_checkpoint.pt", map_location="cpu")
+    model.load_state_dict(checkpoint)
     model.to(device)
 
     xm.broadcast_master_param(model)
@@ -64,12 +61,14 @@ def train_model(index, args):
     )
 
     lr_scheduler_1 = torch.optim.lr_scheduler.LinearLR(
-        optim, start_factor=1e-3, end_factor=1.0, total_iters=config["schdlr_warmup"]
+        optim, start_factor=1e-6, end_factor=1.0, total_iters=config["schdlr_warmup"]
     )
 
-    # substract warmup from max_steps (fix offset)
-    lr_scheduler_2 = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optim, T_max=config["max_steps"] - config["schdlr_warmup"], eta_min=0.0
+    lr_scheduler_2 = torch.optim.lr_scheduler.LinearLR(
+        optim,
+        start_factor=1.0,
+        end_factor=0.0,
+        total_iters=config["max_steps"] - config["schdlr_warmup"],
     )
 
     lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
@@ -83,8 +82,7 @@ def train_model(index, args):
     )
 
     if xm.is_master_ordinal(local=False):
-        wandb.init(project="wikitext103_oasst1_lm", group="experiment_1", config=config)
-        # wandb.watch(model, log="all")
+        wandb.init(project="wikitext103_oasst1_lm", group="fine_tune", config=config)
 
     run = Run(
         model,
@@ -144,9 +142,8 @@ def train_model(index, args):
 
         if xm.is_master_ordinal(local=False):
             cpu_state_dict = {k: v.cpu() for k, v in model.state_dict().items()}
-            torch.save(cpu_state_dict, "model_checkpoint.pt")
+            torch.save(cpu_state_dict, "fine_tuned_model_checkpoint.pt")
 
     if xm.is_master_ordinal(local=False):
         print(f"Process {index}: Training finished!")
-
-    wandb.finish()
+        wandb.finish()

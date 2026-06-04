@@ -11,50 +11,33 @@ class DecoderLayer(nn.Module):
         mha_conf = config["masked_multihead_attn"]
         self.masked_self_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-5)
         self.masked_self_attn = nn.MultiheadAttention(
-            mha_conf["d_model"],
-            mha_conf["h"],
+            embed_dim=mha_conf["d_model"],
+            num_heads=mha_conf["h"],
             dropout=mha_conf["dropout"],
             batch_first=True,
         )
+        # the last linear layer in the MHA: Wo
+        self.masked_self_attn.out_proj._is_residual = True  # pyright: ignore
 
-        # Multi-Head Attention sublayer (cross-attention encoder-decoder)
-        mha_conf = config["multihead_attn"]
-        self.cross_attn_ln = nn.LayerNorm(config["d_model"], eps=1e-5)
-        self.cross_attn = nn.MultiheadAttention(
-            mha_conf["d_model"],
-            mha_conf["h"],
-            dropout=mha_conf["dropout"],
-            batch_first=True,
-        )
-
-        # Position-Wise FFN sublayer
+        # Position-wise FFN layer
         self.ffn_ln = nn.LayerNorm(config["d_model"], eps=1e-5)
         self.ffn = PositionWiseFFN(config["ffn"])
         self.ffn_dropout = nn.Dropout(p=config["dropout"])
 
-    def forward(self, x, encoder_out, enc_pad_mask, dec_pad_mask, causal_mask):
+    def forward(self, x, pad_mask, causal_mask):
         residual_connection = x
 
-        # Pre-LN masked multi-head attention
+        # Pre-LN masked multihead attention
         x = self.masked_self_attn_ln(x)
         x = self.masked_self_attn(
             x,
             x,
             x,
             attn_mask=causal_mask,
-            key_padding_mask=dec_pad_mask,
+            key_padding_mask=pad_mask,
             is_causal=True,
             need_weights=False,
         )
-        x = x[0]
-
-        x += residual_connection
-
-        residual_connection = x
-
-        # Pre-LN multi-head attention
-        x = self.cross_attn_ln(x)
-        x = self.cross_attn(x, encoder_out, encoder_out, key_padding_mask=enc_pad_mask)
         x = x[0]
 
         x += residual_connection

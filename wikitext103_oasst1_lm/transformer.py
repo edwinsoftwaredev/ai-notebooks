@@ -16,7 +16,7 @@ class Encoder(nn.Module):
 
         # This layer norm normalizes the last residual addition
         # in the encoder_layer
-        self.norm = nn.LayerNorm(config["d_model"], eps=1e-6)
+        self.norm = nn.LayerNorm(config["d_model"], eps=1e-5)
 
     def forward(self, x, enc_pad_mask):
         for layer in self.layers:
@@ -35,7 +35,7 @@ class Decoder(nn.Module):
 
         # This layer norm normalizes the last residual addition
         # in the decoder_layer
-        self.norm = nn.LayerNorm(config["d_model"], eps=1e-6)
+        self.norm = nn.LayerNorm(config["d_model"], eps=1e-5)
 
     def forward(self, x, encoder_out, enc_pad_mask, dec_pad_mask, dec_causal_mask):
         for layer in self.layers:

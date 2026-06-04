@@ -1,10 +1,12 @@
-import sentencepiece as spm
 from itertools import chain
+
+import sentencepiece as spm
 
 from wikitext103_oasst1_lm.datasets import load_tokenizer_datasets
 
 USER_TOKEN = "<user>"
 ASSISTANT_TOKEN = "<assistant>"
+SEP_TOKEN = "<sep>"
 
 
 def train_tokenizer():
@@ -34,7 +36,11 @@ def train_tokenizer():
         character_coverage=1.0,
         model_type="unigram",
         max_sentence_length=10000,
-        user_defined_symbols=[USER_TOKEN, ASSISTANT_TOKEN],
+        user_defined_symbols=[
+            USER_TOKEN,
+            ASSISTANT_TOKEN,
+            SEP_TOKEN,
+        ],
         pad_id=3,
     )
 

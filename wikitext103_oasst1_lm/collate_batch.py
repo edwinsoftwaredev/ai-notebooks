@@ -5,14 +5,65 @@ import torch
 from torch.nn.functional import pad
 
 
-class Batch:
-    def __init__(self, enc_in, dec_in, target, pad_id=3):
-        device = "cpu"  # MPDeviceLoader will move batches to TPU
+class OasstBatch:
+    def __init__(self, dec_in, target, pad_id=3):
+        device, seq_len = "cpu", dec_in.size(1)
+        self.dec_in = dec_in
+        self.dec_pad_mask = dec_in == pad_id
 
-        # encoder input
-        self.enc_in = enc_in
-        # (batch_size, seq_len)
-        self.enc_pad_mask = enc_in == pad_id
+        ones = torch.ones((seq_len, seq_len), device=device)
+        causal_mask = torch.triu(ones, diagonal=1).bool()
+        self.dec_causal_mask = causal_mask
+        self.target = target
+
+
+USER_TOKEN = "<user>"
+ASSISTANT_TOKEN = "<assistant>"
+SEP_TOKEN = "<sep>"
+
+
+def oasst_collate_batch(batch, tokenizer: spm.SentencePieceProcessor):
+    device = "cpu"
+    dec_in, target, bucket = [], [], (512 + 16)
+
+    for seq in batch:
+        prompter, assistant = seq["prompter"], seq["assistant"]
+
+        seq = (
+            [tokenizer.PieceToId(USER_TOKEN)]
+            + prompter
+            + [tokenizer.PieceToId(SEP_TOKEN)]
+            + [tokenizer.PieceToId(ASSISTANT_TOKEN)]
+            + assistant
+        )
+        dec_seq = [tokenizer.bos_id()] + seq
+        tgt = seq + [tokenizer.eos_id()]
+
+        # Loss masking
+        tgt[: len(prompter) + 3] = [tokenizer.pad_id()] * (len(prompter) + 3)
+
+        dec_seq = pad(
+            torch.tensor(dec_seq, dtype=torch.long, device=device),
+            (0, bucket - len(dec_seq)),
+            value=tokenizer.pad_id(),
+        )
+        dec_in.append(dec_seq)
+
+        tgt = pad(
+            torch.tensor(tgt, dtype=torch.long, device=device),
+            (0, bucket - len(tgt)),
+            value=tokenizer.pad_id(),
+        )
+        target.append(tgt)
+
+    dec_in, target = torch.stack(dec_in), torch.stack(target)
+
+    return OasstBatch(dec_in, target, tokenizer.pad_id())
+
+
+class WikitextBatch:
+    def __init__(self, dec_in, target, pad_id=3):
+        device = "cpu"  # MPDeviceLoader will move batches to TPU
 
         # decoder input
         seq_len = dec_in.size(1)
@@ -32,12 +83,12 @@ class Batch:
 
         """
 
-        ones = torch.ones((seq_len, seq_len), device=device)
+        ones = torch.ones((seq_len, seq_len), device=device)  # pyright: ignore
         # causal_mask = torch.triu(ones, diagonal=1).unsqueeze(0).bool()
-        causal_mask = torch.triu(ones, diagonal=1).bool()
+        causal_mask = torch.triu(ones, diagonal=1).bool()  # pyright: ignore
 
         # dynamic shape: torch / xla recompilation trigger
-        # (batch_size, seq_len, seq_len)
+        # 2D mask: (seq_len, seq_len)
         self.dec_causal_mask = causal_mask
 
         # target
@@ -45,10 +96,11 @@ class Batch:
         self.ntokens = (target != pad_id).sum()
 
 
-def collate_batch(batch, tokenizer: spm.SentencePieceProcessor):
+def wikitext_collate_batch(batch, tokenizer: spm.SentencePieceProcessor):
     device = "cpu"  # MPDeviceLoader will move batches to TPU
 
-    enc_in, dec_in, target = [], [], []
+    dec_in, target = [], []
+
     # pad_len = 8
     # max_seq_len = (
     #     tokenizer.Encode(seq, out_type=int, add_bos=True, add_eos=True) for seq in batch
@@ -62,19 +114,8 @@ def collate_batch(batch, tokenizer: spm.SentencePieceProcessor):
     for seq in batch:
         encoded_seq = tokenizer.Encode(seq, out_type=int, add_bos=False, add_eos=False)
         encoded_seq = encoded_seq[:bucket]
-        k = torch.randint(1, len(encoded_seq) + 1, (1,)).item()
 
-        # PREFIX
-        enc_seq = encoded_seq[:k]
-        enc_seq = pad(
-            torch.tensor(enc_seq, dtype=torch.long, device=device),
-            (0, bucket - len(enc_seq)),
-            value=tokenizer.pad_id(),
-        )
-        enc_in.append(enc_seq)
-
-        # SUFFIX
-        dec_seq = [tokenizer.bos_id()] + encoded_seq[k:]
+        dec_seq = [tokenizer.bos_id()] + encoded_seq
         dec_seq = pad(
             torch.tensor(dec_seq, dtype=torch.long, device=device),
             (0, bucket - len(dec_seq)),
@@ -83,7 +124,7 @@ def collate_batch(batch, tokenizer: spm.SentencePieceProcessor):
         dec_in.append(dec_seq)
 
         # TARGET
-        tgt = encoded_seq[k:] + [tokenizer.eos_id()]
+        tgt = encoded_seq + [tokenizer.eos_id()]
         tgt = pad(
             torch.tensor(tgt, dtype=torch.long, device=device),
             (0, bucket - len(tgt)),
@@ -91,8 +132,7 @@ def collate_batch(batch, tokenizer: spm.SentencePieceProcessor):
         )
         target.append(tgt)
 
-    enc_in = torch.stack(enc_in)
     dec_in = torch.stack(dec_in)
     target = torch.stack(target)
 
-    return Batch(enc_in, dec_in, target, tokenizer.pad_id())
+    return WikitextBatch(dec_in, target, tokenizer.pad_id())
