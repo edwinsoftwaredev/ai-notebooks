@@ -22,6 +22,9 @@ graphviz = ">=14.1.2,<15"
 gdown = ">=5.2.1,<6"
 ray-default = ">=2.53.0,<3"
 sentencepiece = ">=0.2.1,<0.3"
+transformers = ">=5.13.0,<6"
+bitsandbytes = ">=0.49.2,<0.50"
+faiss-gpu = ">=1.10.0,<2"
 
 [system-requirements]
 libc = { version = "2.42" }
