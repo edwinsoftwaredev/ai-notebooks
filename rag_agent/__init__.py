@@ -1,6 +1,7 @@
 import os
 
 os.environ["HF_HOME"] = "/kaggle/working/hf_cache"
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 import dask
 import dask.dataframe as ddf
@@ -134,10 +135,15 @@ def _download_dataset():
             ignore_errors=True,
         )
 
+        # SAVE NOTEBOOK AS DATASET AND USE AS NOTEBOOK INPUT LATER
+
 
 def id_document_df(question=False):
     def map_partition(p):
-        p = p[p["document"].apply(lambda x: isinstance(x, dict))]
+        p = p[
+            p["document"].apply(lambda x: isinstance(x, dict))
+            & p["question"].apply(lambda x: isinstance(x, dict))
+        ]
 
         if p.empty:
             return p
@@ -154,11 +160,13 @@ def id_document_df(question=False):
         p["id"] = p["id"].apply(int)
 
         if question:
-            p["question"] = p["question"].apply(lambda d: d["tokens"])
+            p["question"] = p["question"].apply(lambda d: d["tokens"].tolist())
 
         return p
 
-    df = ddf.read_parquet("/kaggle/working/nq_dataset/*")
+    df = ddf.read_parquet(
+        "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_dataset/*"
+    )
     cols = ["id", "document"]
 
     if question:
@@ -185,14 +193,18 @@ def partition_to_embeddings(p, col, tokenizer, model, training=False):
         partition_embeddings = []
         partition_doc_ids = []
 
-        def batch_to_embeddings(batch):
-            t_call = time.perf_counter()
+        def batch_to_embeddings(doc_batch):
+            max_len = 512
+            stride = int(max_len * 0.35)
 
             inputs = tokenizer(
-                batch,
+                doc_batch,
                 is_split_into_words=True,
-                padding=True,
+                max_length=max_len,
+                stride=stride,
+                padding="max_length",
                 truncation=True,
+                return_overflowing_tokens=True,
                 add_special_tokens=True,
                 return_attention_mask=True,
                 return_tensors="pt",
@@ -200,20 +212,15 @@ def partition_to_embeddings(p, col, tokenizer, model, training=False):
 
             inputs = {k: v.to(device) for k, v in inputs.items()}
 
-            t_model = time.perf_counter()
             outputs = model(**inputs)
             embeddings = mean_pooling(outputs[0], inputs["attention_mask"])
 
-            print(f"batch_to_embeddings forward delta: {time.perf_counter() - t_model}")
+            id_mapping = inputs["overflow_to_sample_mapping"]
 
             del outputs
             del inputs
 
-            print(f"batch_to_embeddings delta: {time.perf_counter() - t_call}")
-
-            print("-----------------------")
-
-            return embeddings
+            return embeddings, id_mapping
 
         def col_selector(doc):
             if col == "question":
@@ -221,51 +228,49 @@ def partition_to_embeddings(p, col, tokenizer, model, training=False):
 
             return doc.document
 
-        with torch.inference_mode():
-            chunk_count = 0
-            chunk_batch = []
-            max_chunk_batch_size = 512
+        # remove URLS
+        p[col] = p[col].map(
+            lambda doc: (
+                [t for t in doc if not t.startswith(("https://", "http://"))]
+                if isinstance(doc, list)
+                else doc
+            )
+        )
 
+        t_p = time.perf_counter()
+        with torch.inference_mode():
+            doc_ids = []
+            doc_batch = []
             for doc in p.itertuples():
                 if not isinstance(col_selector(doc), list):
                     continue
 
                 doc_id = doc.id
-                chunk_size = 128
                 doc = col_selector(doc)
-                stride = int(chunk_size * 0.75)
 
-                # remove URLS
-                doc = list(
-                    filter(lambda t: not t.startswith(("https://", "http://")), doc)
-                )
+                doc_batch.append(doc)
+                doc_ids.append(doc_id)
 
-                doc = [doc[i : i + chunk_size] for i in range(0, len(doc), stride)]
-
-                if not training:
-                    partition_doc_ids.extend([doc_id] * len(doc))
-
-                while chunk_count + len(doc) >= max_chunk_batch_size:
-                    # diff = (chunk_count + len(doc)) - max_chunk_batch_size
-                    rem = max_chunk_batch_size - chunk_count
-
-                    chunk_batch.extend(doc[:rem])
-                    doc = doc[rem:]
-
-                    embeddings = batch_to_embeddings(chunk_batch)
+                if len(doc_batch) == 16:
+                    embeddings, id_map = batch_to_embeddings(doc_batch)
                     partition_embeddings.append(embeddings.cpu())
 
-                    chunk_count = 0
-                    chunk_batch = []
+                    if not training:
+                        partition_doc_ids.extend([doc_ids[i] for i in id_map])
 
-                chunk_count += len(doc)
-                chunk_batch.extend(doc)
+                    doc_ids = []
+                    doc_batch = []
 
-            if chunk_count:
-                embeddings = batch_to_embeddings(chunk_batch)
+            if len(doc_batch):
+                embeddings, id_map = batch_to_embeddings(doc_batch)
                 partition_embeddings.append(embeddings.cpu())
 
+                if not training:
+                    partition_doc_ids.extend([doc_ids[i] for i in id_map])
+
         partition_embeddings = torch.cat(partition_embeddings).numpy()
+
+        print(f"p delta: {time.perf_counter() - t_p}")
 
         if training:
             return partition_embeddings
@@ -307,13 +312,14 @@ def _build_index(training, p_start):
         index_ivf.clustering_index = clustering_index
 
     else:
-        index = faiss.read_index("/kaggle/working/nq_indexes/trained.index")
+        index = faiss.read_index(
+            "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_indexes/trained.index"
+        )
 
     df = id_document_df()
 
     if training:
-        # parts = df.partitions[:20].to_delayed()
-        parts = df.partitions[:1].to_delayed()
+        parts = df.partitions[:70].to_delayed()
 
         parts = [
             dask.delayed(partition_to_embeddings)(  # pyright: ignore
@@ -329,6 +335,7 @@ def _build_index(training, p_start):
         parts = np.concat(parts)
         faiss.normalize_L2(parts)
         index.train(parts)
+        os.makedirs("/kaggle/working/nq_indexes", exist_ok=True)
         faiss.write_index(index, "/kaggle/working/nq_indexes/trained.index")
 
         print("Done")
@@ -351,7 +358,9 @@ def _build_index(training, p_start):
             )
 
         else:
-            metadata = pd.read_parquet("/kaggle/working/nq_indexes/metadata.parquet")
+            metadata = pd.read_parquet(
+                "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_indexes/metadata.parquet"
+            )
             offset = len(metadata)
 
         embeddings = df.partitions[p_start : p_start + 5].to_delayed()
@@ -385,15 +394,17 @@ def _build_index(training, p_start):
 
 
 def recall(k=5):
+    import time
+
     tokenizer = AutoTokenizer.from_pretrained("facebook/contriever")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = AutoModel.from_pretrained("facebook/contriever")
-    model.to(device)
 
     gpu_count = torch.cuda.device_count()
     if gpu_count > 1:
         model = torch.nn.DataParallel(model)
 
+    model.to(device)
     model.eval()
 
     df = id_document_df(question=True)
@@ -427,17 +438,36 @@ def recall(k=5):
     queries = np.concat(queries)
     faiss.normalize_L2(queries)
 
+    # TODO: Remove this
     pq_index = faiss.read_index("/kaggle/working/nq_indexes/trained.index")
 
-    _flat_index_D, flat_index_I = flat_index.search(queries, k)  # pyright: ignore
-    _pq_index_D, pq_index_I = pq_index.search(queries, k)
+    # pq_index = faiss.read_index(
+    #     "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_indexes/trained.index"
+    # )
+    #
 
-    # truth table -> recall per query -> avg recall across all queries
-    # Note that this is chunk level recall
+    recalls = []
+    index_ivf = faiss.extract_index_ivf(pq_index)
+    for nprobe in [1, 4, 16, 32, 64, 128, 256, 512, 1024, 4096, index_ivf.nlist]:
+        index_ivf.nprobe = nprobe
 
-    return (
-        (pq_index_I[:, :, None] == flat_index_I[:, None, :])
-        .any(axis=2)
-        .mean(axis=1)
-        .mean()
-    )
+        _flat_index_D, flat_index_I = flat_index.search(queries, k)  # pyright: ignore
+
+        t_q = time.perf_counter()
+        _pq_index_D, pq_index_I = pq_index.search(queries, k)
+        t_q = f"pq_index q delta: {time.perf_counter() - t_q}"
+
+        # truth table -> recall per query -> avg recall across all queries
+        # Note that this is chunk level recall
+        recalls.append(
+            (
+                nprobe,
+                (pq_index_I[:, :, None] == flat_index_I[:, None, :])
+                .any(axis=2)
+                .mean(axis=1)
+                .mean(),
+                t_q,
+            )
+        )
+
+    return recalls
