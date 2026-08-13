@@ -1,17 +1,42 @@
 import os
 
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["HF_HOME"] = "/kaggle/working/hf_cache"
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 import dask
 import dask.dataframe as ddf
-import faiss
 import huggingface_hub
 import numpy as np
 import pandas as pd
 import torch
-from huggingface_hub import snapshot_download
-from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig, pipeline
+import wandb
+from kaggle_secrets import UserSecretsClient  # pyright: ignore
+from torch.utils.data import DataLoader, Dataset
+from transformers import (
+    AutoModel,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    pipeline,
+)
+
+from rag_agent.enums import (
+    DATASET_PATH,
+    INDEX_FINAL_PATH,
+    INDEX_PART1_PATH,
+    INDEX_PATH,
+    LOCAL_W_PATH,
+    TRAINED_INDEX_PATH,
+)
+
+torch.backends.cudnn.benchmark = True
+
+try:
+    user_secrets = UserSecretsClient()  # pyright: ignore
+    secret_value_0 = user_secrets.get_secret("WANDB_API_KEY")
+    wandb.login(key=secret_value_0)
+except Exception as exc:  # noqa: BLE001
+    print(exc)
 
 
 def _download_model():
@@ -51,99 +76,16 @@ def _download_model():
     return pipe(text=messages)  # pyright: ignore
 
 
-def _download_dataset():
-    import shutil
-
-    from rag_agent import nq_schema
-
-    def update_document(d):
-        if "html" in d:
-            del d["html"]
-
-        if "tokens" in d:
-            if "end_byte" in d["tokens"]:
-                del d["tokens"]["end_byte"]
-
-            if "start_byte" in d["tokens"]:
-                del d["tokens"]["start_byte"]
-
-        return d
-
-    def update_annotations(d):
-        if "id" in d:
-            del d["id"]
-
-        if "long_answer" in d:
-            for dd in d["long_answer"]:
-                if "candidate_index" in dd:
-                    del dd["candidate_index"]
-
-                if "start_byte" in dd:
-                    del dd["start_byte"]
-
-                if "end_byte" in dd:
-                    del dd["end_byte"]
-
-        if "short_answers" in d:
-            del d["short_answers"]
-
-        if "yes_no_answer" in d:
-            del d["yes_no_answer"]
-
-        return d
-
-    def update_question(d):
-        if "text" in d:
-            del d["text"]
-
-        return d
-
-    def update_partitions(df):
-        df = df.drop(columns=["long_answer_candidates"])
-        df["question"] = df["question"].map(update_question)
-        df["document"] = df["document"].map(update_document)
-        df["annotations"] = df["annotations"].map(update_annotations)
-        return df
-
-    n_parquets = int(287 * 0.5)
-    repo_id = "google-research-datasets/natural_questions"
-    for i in range(0, n_parquets, 25):
-        files = [
-            f"default/train-{(i + j):05d}-of-00287.parquet"
-            for j in range(25)
-            if (i + j) <= n_parquets
-        ]
-
-        parquets = snapshot_download(
-            repo_id=repo_id,
-            allow_patterns=files,
-            repo_type="dataset",
-        )
-
-        df = ddf.read_parquet(f"{parquets}/**/*.parquet")
-        df = df.map_partitions(update_partitions)
-        df.to_parquet(
-            "/kaggle/working/nq_dataset",
-            engine="pyarrow",
-            schema=nq_schema.schema,
-            append=True,
-            write_index=False,
-        )
-
-        shutil.rmtree(
-            "/kaggle/working/hf_cache/hub/datasets--google-research-datasets--natural_questions",
-            ignore_errors=True,
-        )
-
-        # SAVE NOTEBOOK AS DATASET AND USE AS NOTEBOOK INPUT LATER
-
-
 def id_document_df(question=False):
     def map_partition(p):
-        p = p[
-            p["document"].apply(lambda x: isinstance(x, dict))
-            & p["question"].apply(lambda x: isinstance(x, dict))
-        ]
+        if question:
+            p = p[
+                p["document"].apply(lambda x: isinstance(x, dict))
+                & p["question"].apply(lambda x: isinstance(x, dict))
+            ]
+
+        else:
+            p = p[p["document"].apply(lambda x: isinstance(x, dict))]
 
         if p.empty:
             return p
@@ -164,9 +106,7 @@ def id_document_df(question=False):
 
         return p
 
-    df = ddf.read_parquet(
-        "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_dataset/*"
-    )
+    df = ddf.read_parquet(f"{DATASET_PATH}/nq-dataset/nq_dataset/*")
     cols = ["id", "document"]
 
     if question:
@@ -176,6 +116,49 @@ def id_document_df(question=False):
     df = df.map_partitions(map_partition)
 
     return df
+
+
+class PartitionDataset(Dataset):
+    def __init__(self, pdf, col):
+        self.pdf = pdf
+        self.col = col
+        self.pdf = self.pdf[self.pdf[col].apply(lambda x: isinstance(x, list))]
+        # remove URLS
+        self.pdf[col] = self.pdf[col].map(
+            lambda doc: (
+                [t for t in doc if not t.startswith(("https://", "http://"))]
+                if isinstance(doc, list)
+                else doc
+            )
+        )
+
+    def __len__(self):
+        return len(self.pdf)
+
+    def __getitem__(self, idx):
+        doc = self.pdf.iloc[idx]
+        return doc["id"], doc[self.col]
+
+
+def collate_fn(batch, tokenizer):
+    max_len = 512
+    stride = int(max_len * 0.35)
+    doc_ids, doc_batch = zip(*batch)
+    doc_ids, doc_batch = list(doc_ids), list(doc_batch)
+    inputs = tokenizer(
+        doc_batch,
+        is_split_into_words=True,
+        max_length=max_len,
+        stride=stride,
+        padding="max_length",
+        truncation=True,
+        return_overflowing_tokens=True,
+        add_special_tokens=True,
+        return_attention_mask=True,
+        return_tensors="pt",
+    )
+
+    return doc_ids, inputs
 
 
 def partition_to_embeddings(p, col, tokenizer, model, training=False):
@@ -193,80 +176,32 @@ def partition_to_embeddings(p, col, tokenizer, model, training=False):
         partition_embeddings = []
         partition_doc_ids = []
 
-        def batch_to_embeddings(doc_batch):
-            max_len = 512
-            stride = int(max_len * 0.35)
-
-            inputs = tokenizer(
-                doc_batch,
-                is_split_into_words=True,
-                max_length=max_len,
-                stride=stride,
-                padding="max_length",
-                truncation=True,
-                return_overflowing_tokens=True,
-                add_special_tokens=True,
-                return_attention_mask=True,
-                return_tensors="pt",
-            )
-
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-
-            outputs = model(**inputs)
-            embeddings = mean_pooling(outputs[0], inputs["attention_mask"])
-
-            id_mapping = inputs["overflow_to_sample_mapping"]
-
-            del outputs
-            del inputs
-
-            return embeddings, id_mapping
-
-        def col_selector(doc):
-            if col == "question":
-                return doc.question
-
-            return doc.document
-
-        # remove URLS
-        p[col] = p[col].map(
-            lambda doc: (
-                [t for t in doc if not t.startswith(("https://", "http://"))]
-                if isinstance(doc, list)
-                else doc
-            )
+        ds = PartitionDataset(p, col)
+        coll_fn = lambda batch: collate_fn(batch, tokenizer)
+        dl = DataLoader(
+            ds,
+            32,
+            num_workers=4,
+            collate_fn=coll_fn,
+            pin_memory=True,
+            persistent_workers=True,
         )
 
         t_p = time.perf_counter()
-        with torch.inference_mode():
-            doc_ids = []
-            doc_batch = []
-            for doc in p.itertuples():
-                if not isinstance(col_selector(doc), list):
-                    continue
+        with torch.inference_mode(), torch.amp.autocast("cuda", dtype=torch.float16):  # pyright: ignore
+            for i, (doc_ids, inputs) in enumerate(dl):
+                id_mapping = inputs.pop("overflow_to_sample_mapping")
+                inputs = {k: v.to(device, non_blocking=True) for k, v in inputs.items()}
 
-                doc_id = doc.id
-                doc = col_selector(doc)
+                outputs = model(**inputs)
+                embeddings = mean_pooling(outputs[0], inputs["attention_mask"])
 
-                doc_batch.append(doc)
-                doc_ids.append(doc_id)
+                del outputs
 
-                if len(doc_batch) == 16:
-                    embeddings, id_map = batch_to_embeddings(doc_batch)
-                    partition_embeddings.append(embeddings.cpu())
-
-                    if not training:
-                        partition_doc_ids.extend([doc_ids[i] for i in id_map])
-
-                    doc_ids = []
-                    doc_batch = []
-
-            if len(doc_batch):
-                embeddings, id_map = batch_to_embeddings(doc_batch)
-                partition_embeddings.append(embeddings.cpu())
+                partition_embeddings.append(embeddings.float().cpu())
 
                 if not training:
-                    partition_doc_ids.extend([doc_ids[i] for i in id_map])
+                    partition_doc_ids.extend([doc_ids[i] for i in id_mapping])
 
         partition_embeddings = torch.cat(partition_embeddings).numpy()
 
@@ -282,7 +217,9 @@ def partition_to_embeddings(p, col, tokenizer, model, training=False):
     return to_embeddings(p, training)
 
 
-def _build_index(training, p_start):
+def _build_index(training, first_part=True):
+    import faiss
+
     tokenizer = AutoTokenizer.from_pretrained("facebook/contriever")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = AutoModel.from_pretrained("facebook/contriever")
@@ -294,32 +231,44 @@ def _build_index(training, p_start):
     model.to(device)
     model.eval()
 
-    D = 256
+    D = 512
     M = D // 4
+
+    idx_factory_string = f"OPQ{M}_{D},IVF65536_HNSW32,PQ{M}x8"
 
     if training:
         try:
-            os.remove("/kaggle/working/nq_indexes/trained.index")
+            os.remove(f"{LOCAL_W_PATH}/nq_indexes/trained.index")
 
         except FileNotFoundError:
             pass
 
-        index = faiss.index_factory(
-            768, f"OPQ{M}_{D},IVF65536_HNSW32,PQ{M}", faiss.METRIC_INNER_PRODUCT
-        )
+        index = faiss.index_factory(768, idx_factory_string, faiss.METRIC_INNER_PRODUCT)
         index_ivf = faiss.extract_index_ivf(index)
         clustering_index = faiss.index_cpu_to_all_gpus(faiss.IndexFlatL2(index_ivf.d))
         index_ivf.clustering_index = clustering_index
 
     else:
-        index = faiss.read_index(
-            "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_indexes/trained.index"
-        )
+        if first_part:
+            index = faiss.read_index(
+                f"{DATASET_PATH}/{TRAINED_INDEX_PATH}/nq_indexes/trained.index"
+            )
+        else:
+            index = faiss.read_index(f"{DATASET_PATH}/{INDEX_PART1_PATH}/{INDEX_PATH}")
 
     df = id_document_df()
 
     if training:
-        parts = df.partitions[:70].to_delayed()
+        wandb.init(
+            project="rag_agent",
+            group="training_1",
+            config={
+                "n_partitions": 110,
+                "index": idx_factory_string,
+            },
+        )
+
+        parts = df.partitions[:110].to_delayed()
 
         parts = [
             dask.delayed(partition_to_embeddings)(  # pyright: ignore
@@ -335,17 +284,17 @@ def _build_index(training, p_start):
         parts = np.concat(parts)
         faiss.normalize_L2(parts)
         index.train(parts)
-        os.makedirs("/kaggle/working/nq_indexes", exist_ok=True)
-        faiss.write_index(index, "/kaggle/working/nq_indexes/trained.index")
+        os.makedirs(f"{LOCAL_W_PATH}/nq_indexes", exist_ok=True)
+        faiss.write_index(index, f"{LOCAL_W_PATH}/nq_indexes/trained.index")
 
         print("Done")
 
     else:
         metadata = None
         offset = 0
-        if p_start == 0:
+        if first_part:
             try:
-                os.remove("/kaggle/working/nq_indexes/metadata.parquet")
+                os.remove(f"{LOCAL_W_PATH}/nq_indexes/metadata.parquet")
 
             except FileNotFoundError:
                 pass
@@ -359,11 +308,12 @@ def _build_index(training, p_start):
 
         else:
             metadata = pd.read_parquet(
-                "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_indexes/metadata.parquet"
+                f"{DATASET_PATH}/{INDEX_PART1_PATH}/nq_indexes/metadata.parquet"
             )
             offset = len(metadata)
 
-        embeddings = df.partitions[p_start : p_start + 5].to_delayed()
+        start, end = 0 if first_part else 75, 75 if first_part else None
+        embeddings = df.partitions[start:end].to_delayed()
         embeddings = [
             dask.delayed(partition_to_embeddings)(  # pyright: ignore
                 p,
@@ -383,18 +333,22 @@ def _build_index(training, p_start):
 
         faiss.normalize_L2(embeddings)
         index.add_with_ids(embeddings, ids)
-        faiss.write_index(index, "/kaggle/working/nq_indexes/trained.index")
+        os.makedirs(f"{LOCAL_W_PATH}/nq_indexes", exist_ok=True)
+
+        faiss.write_index(index, f"{LOCAL_W_PATH}/{INDEX_PATH}")
 
         metadata = pd.concat(
             [metadata, pd.DataFrame({"id": ids, "doc_id": doc_ids})], ignore_index=True
         )
-        metadata.to_parquet("/kaggle/working/nq_indexes/metadata.parquet", index=False)
+        metadata.to_parquet(f"{LOCAL_W_PATH}/nq_indexes/metadata.parquet", index=False)
 
         print("Done")
 
 
 def recall(k=5):
     import time
+
+    import faiss
 
     tokenizer = AutoTokenizer.from_pretrained("facebook/contriever")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -408,7 +362,7 @@ def recall(k=5):
     model.eval()
 
     df = id_document_df(question=True)
-    embeddings = df.partitions[:5].to_delayed()
+    embeddings = df.partitions[:75].to_delayed()
     embeddings = [
         dask.delayed(partition_to_embeddings)(p, "document", tokenizer, model, False)  # pyright: ignore
         for p in embeddings
@@ -427,7 +381,7 @@ def recall(k=5):
     flat_index.add_with_ids(embeddings, ids)  # pyright: ignore
 
     # Queries
-    queries = df[["id", "question"]].partitions[:5].to_delayed()
+    queries = df[["id", "question"]].partitions[:75].to_delayed()
     queries = [
         dask.delayed(partition_to_embeddings)(p, "question", tokenizer, model, False)  # pyright: ignore
         for p in queries
@@ -438,13 +392,9 @@ def recall(k=5):
     queries = np.concat(queries)
     faiss.normalize_L2(queries)
 
-    # TODO: Remove this
-    pq_index = faiss.read_index("/kaggle/working/nq_indexes/trained.index")
+    # TODO: MAKE FLAT INDEX DATASET
 
-    # pq_index = faiss.read_index(
-    #     "/kaggle/input/datasets/edwinsoftwaredev/rag-agent-trained-index/nq_indexes/trained.index"
-    # )
-    #
+    pq_index = faiss.read_index(f"{DATASET_PATH}/{INDEX_PART1_PATH}/{INDEX_PATH}")
 
     recalls = []
     index_ivf = faiss.extract_index_ivf(pq_index)
