@@ -20,27 +20,18 @@ def wikipedia_articles_retriever_func(tokenizer, embedder, index, index_metadata
         """
 
         input_docs = retriever.retrieve(
-            queries, tokenizer, embedder, index, index_metadata, df, 5
+            queries, tokenizer, embedder, index, index_metadata, df, 2
         )
 
-        passages = reranker.from_flat_index(input_docs, tokenizer, embedder, 10)
+        passages = reranker.from_flat_index(input_docs, tokenizer, embedder, 5)
 
         passages = "\n\n".join(
             [f"<doc id='{i + 1}'>\n{p}\n</doc>" for i, p in enumerate(passages)]
         )
 
-        # user_content = f"""Context Documents:
-        #     <documents>
-        #     {passages}
-        #     </documents>
-
-        # User Query: {user_query}"""
-
         passages = f"""<documents>
             {passages}
         </documents>"""
-
-        print(passages)
 
         return passages
 

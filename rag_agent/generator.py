@@ -1,65 +1,32 @@
-import inspect
-from pathlib import Path
+import json
 
 import dask.dataframe as ddf
 import faiss
-import huggingface_hub
+import kagglehub  # pyright: ignore
 import pandas as pd
 import torch
 from kaggle_secrets import UserSecretsClient  # pyright: ignore
 from transformers import (
     AutoModel,
-    AutoModelForImageTextToText,
+    AutoModelForCausalLM,
     AutoProcessor,
     AutoTokenizer,
     BitsAndBytesConfig,
-    pipeline,
 )
 
 from rag_agent import agent_tools
 from rag_agent.enums import DATASET_PATH, IDX_PATH
 
-response_template = {
-    "defaults": {"role": "assistant"},
-    "start_anchor": "<start_of_turn>model\n",
-    "fields": {
-        "thinking": {
-            "open": "<agent_trace>",
-            "close": "</agent_trace>",
-            "content": "text",
-            "repeats": True,
-            "join": "\n",
-        },
-        "tool_calls": {
-            "open": "<tool_call>",
-            "close": "</tool_call>",
-            "repeats": True,
-            "content": "json",
-            "transform": {"type": "function", "function": "{content}"},
-        },
-        "content": {
-            "close": "<end_of_turn>",
-            "content": "text",
-        },
-    },
-}
+MODEL_PATH = kagglehub.model_download("google/gemma-4/transformers/gemma-4-12b-it")
 
 
 def parse_tool(tool, tool_map):
     tool_map[tool.__name__] = tool
-
-    return f"""<tool>
-        <name>{tool.__name__}</name>
-        <description>{inspect.getdoc(tool)}</description>
-        <signature>{inspect.signature(tool)}</signature>
-    </tool>\n"""
+    return tool
 
 
 def get_pipeline():
     user_secrets = UserSecretsClient()
-    hf_gemma_token = user_secrets.get_secret("hf_gemma_3_4b_token")
-    huggingface_hub.login(hf_gemma_token, skip_if_logged_in=True)
-    model_id = "google/gemma-3-4b-it"
 
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -68,29 +35,17 @@ def get_pipeline():
         bnb_4bit_quant_type="nf4",
     )
 
-    model = AutoModelForImageTextToText.from_pretrained(
-        model_id,
-        quantization_config=quantization_config,
-        device_map="auto",
-        dtype=torch.bfloat16,
-    )
+    with open("/kaggle/working/ai-notebooks/rag_agent/tokenizer_config.json") as f:
+        config = json.load(f)
 
-    processor = AutoProcessor.from_pretrained(model_id)
-    chat_template = Path(
-        "/kaggle/working/ai-notebooks/rag_agent/chat_template.jinja"
-    ).read_text()
-
-    gemma_tokenizer = AutoTokenizer.from_pretrained(model_id)
-    gemma_tokenizer.response_template = response_template
-    gemma_tokenizer.chat_template = chat_template
-    processor.tokenizer.chat_template = chat_template
+    response_template = config["response_template"]
+    processor = AutoProcessor.from_pretrained(MODEL_PATH)
     processor.tokenizer.response_template = response_template
-
-    pipe = pipeline(
-        "image-text-to-text",
-        model=model,
-        processor=processor,
-        tokenizer=gemma_tokenizer,
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_PATH,
+        dtype=torch.bfloat16,
+        device_map="auto",
+        quantization_config=quantization_config,
     )
 
     tokenizer = AutoTokenizer.from_pretrained("facebook/contriever")
@@ -117,22 +72,12 @@ def get_pipeline():
         )
     )
 
-    tools = "".join(tools)
-
-    tool_hint = '{"name":"function_name","arguments":{"argument":"value"}}'
-
-    system_msg = f"""You are an AI agent.
+    system_msg = """You are an AI agent.
     Accuracy and factual correctness are critical to your work.
     Therefore you must always adhere to the following guidelines.
 
     GUIDELINES
         ## GENERAL BEHAVIOR
-        - When talking to yourself, generate agent traces.
-          An agent trace must be enclosed in <agent_trace> tags and should be
-          one or two sentences long, describing your reasoning.
-        - Your very first output on every turn must be an agent trace.
-        - Use the agent traces to explicitly drive your actions.
-        - Do not use agent traces as a source of truth or as evidence in your final answer.
         - Once the available information is sufficient to complete the task, proceed with giving the answer
           and stop generating.
         - Ask the user for missing details only if they are critical to completing the task
@@ -140,9 +85,7 @@ def get_pipeline():
 
         ## TOOLS USAGE
         - Do not call a tool if the available information is sufficient to complete the task without it.
-        - Before calling a tool, refer to the agent traces to determine how it should be used or the justification of its usage.
-        - A tool call must be enclosed in <tool_call> tag and use following the format:
-          {tool_hint}
+        - Before calling a tool, determine how it should be used or the justification of its usage.
         - Always call the appropriate tools.
         - Do not generate tool results.
         - The controller will execute the tool and provide its result in a subsequent interaction.
@@ -162,9 +105,6 @@ def get_pipeline():
         ## UNCERTAINTY & AMBIGUITY
         - Ask for clarification when the task or the inputs are ambiguous.
         - State uncertainty in your response when the available information is insufficient to provide a grounded answer.
-
-    AVAILABLE TOOLS
-        {tools}
 
     """
 
@@ -186,25 +126,31 @@ def get_pipeline():
                 {"role": "user", "content": [{"type": "text", "text": user_query}]}
             )
 
-            input_ids = gemma_tokenizer.apply_chat_template(
-                messages, add_generation_prompt=True, return_tensors="pt"
-            )["input_ids"].to(model.device)
+            text = processor.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=True,
+                tools=tools,
+            )
+            inputs = processor(text=text, return_tensors="pt").to(model.device)
+            input_len = inputs["input_ids"].shape[-1]
 
-            out_text = model.generate(  # pyright: ignore
-                input_ids, max_new_tokens=1024
-            )[0, input_ids.shape[1] :]
+            # Generate output
+            outputs = model.generate(**inputs, max_new_tokens=1024)  # pyright: ignore
+            response = processor.decode(
+                outputs[0][input_len:], skip_special_tokens=False
+            )
 
-            out_text = gemma_tokenizer.decode(out_text)
-            print(out_text)
-            print("--------------------------")
+            # Parse thinking
+            response = processor.parse_response(response, prefix=inputs["input_ids"])
 
-            out_text = gemma_tokenizer.parse_response(out_text, prefix=input_ids[0])
-            messages.append(out_text)
+            messages.append(response)
 
-            while "tool_calls" in out_text:
+            while "tool_calls" in response:
                 tools_out = []
 
-                for tool in out_text["tool_calls"]:
+                for tool in response["tool_calls"]:
                     if tool["function"]["name"] not in tool_map:
                         continue
 
@@ -214,31 +160,29 @@ def get_pipeline():
                     )
                     tools_out.append(tool(**args))
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "content": f"<tool_response>{tools_out}</tool_respose>",
-                    }
+                messages.append({"role": "tool", "content": str(tools_out)})
+
+                text = processor.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=True,
+                    tools=tools,
+                )
+                inputs = processor(text=text, return_tensors="pt").to(model.device)
+                input_len = inputs["input_ids"].shape[-1]
+
+                # Generate output
+                outputs = model.generate(**inputs, max_new_tokens=1024)  # pyright: ignore
+                response = processor.decode(
+                    outputs[0][input_len:], skip_special_tokens=False
                 )
 
-                input_ids = gemma_tokenizer.apply_chat_template(
-                    messages, add_generation_prompt=True, return_tensors="pt"
-                )["input_ids"].to(model.device)
-
-                out_text = model.generate(  # pyright: ignore
-                    input_ids, max_new_tokens=1024
-                )[0, input_ids.shape[1] :]
-
-                out_text = gemma_tokenizer.decode(out_text)
-                out_text = gemma_tokenizer.parse_response(out_text, prefix=input_ids[0])
-
-                messages.append(out_text)
-
-                print(out_text)
-                print("--------------------------")
-
-            # result = pipe(text=messages, max_new_tokens=1024)  # pyright: ignore
-            # messages.append(result[0]["generated_text"][-1])
+                # Parse thinking
+                response = processor.parse_response(
+                    response, prefix=inputs["input_ids"]
+                )
+                messages.append(response)
 
         return messages[-1]
 
