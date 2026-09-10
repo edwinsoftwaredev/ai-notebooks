@@ -1,4 +1,17 @@
 {
-  "venvPath": ".",
-  "venv": ".pixi/envs/default",
+    "venvPath": ".",
+    "venv": ".pixi/envs/default",
+    "include": ["."],
+    "exclude": [
+	    "**/.git",
+	    "**/.pixi",
+	    "**/__pycache__",
+	    "**/build",
+	    "**/dist",
+      "**/node_modules",
+      ".pixi",
+      ".venv",
+      "venv",
+      ".conda",
+    ],
 }

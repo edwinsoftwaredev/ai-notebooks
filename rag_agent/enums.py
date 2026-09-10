@@ -1,0 +1,7 @@
+DATASET_PATH = "/kaggle/input/datasets/edwinsoftwaredev"
+TRAINED_INDEX_PATH = "/rag-agent-trained-index"
+INDEX_PART1_PATH = "/rag-agent-index-part1"
+INDEX_FINAL_PATH = "/rag-agent-index"
+INDEX_PATH = "/nq_indexes/retreiver.index"
+LOCAL_W_PATH = "/kaggle/working"
+IDX_PATH = f"{DATASET_PATH}/{INDEX_FINAL_PATH}/nq_indexes"
