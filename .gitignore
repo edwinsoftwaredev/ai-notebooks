@@ -5,3 +5,9 @@ cifar10_classifier/content
 __pycache__# pixi environments
 .pixi/*
 !.pixi/config.toml
+
+**/build/*
+**/wave_renderer/*.so
+**/wave_renderer/*.dll
+**/wave_renderer/*.dylib
+__pycache__
