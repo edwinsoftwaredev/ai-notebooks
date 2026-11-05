@@ -33,26 +33,26 @@ def read_dataset():
 
 def plot_frame():
     import os
-    from wave_renderer.decoder import get_frame
+    from wave_renderer.decoder import FLACDatasetIter
     import numpy as np
 
     secret_value_0 = os.getenv("WAVE_RENDERER_WANDB_API_KEY")
     wandb.login(key=secret_value_0)
 
+    dataset_iter = FLACDatasetIter()
+    audio_wave = dataset_iter.next_batch()[0]
+
     SAMPLE_RATE = 16000
-    BLOCK_SIZE = 4096
-    time_1 = np.arange(BLOCK_SIZE) / SAMPLE_RATE
-    
-    frame = get_frame()
-    
+    SAMPLES = audio_wave.size
+    time_axis = np.arange(SAMPLES) / SAMPLE_RATE
+
     wandb.init(
         project="wave_renderer",
         group="experiment_1",
-        resume="allow",
     )
 
     table = wandb.Table(
-        data=np.column_stack((time_1, frame)),
+        data=np.column_stack((time_axis, audio_wave)),
         columns=["time", "amplitude"]
     )
 
