@@ -1,9 +1,12 @@
+#include <algorithm>
 #include <arrow/io/api.h>
 #include <arrow/scalar.h>
 #include <arrow/table.h>
 #include <arrow/type_fwd.h>
+#include <cmath>
 #include <iostream>
 #include <memory>
+#include <numbers>
 #include <parquet/arrow/reader.h>
 
 #include <FLAC++/decoder.h>
@@ -23,7 +26,7 @@ using OutputFrame = std::array<int16_t, BLOCK_SIZE * CHANNELS>;
 using OutputWave = std::vector<int16_t>; // note that reallocation takes O(n)
 
 using AudioWaveBatch =
-    nb::ndarray<int16_t, nb::numpy, nb::ndim<2>, nb::c_contig>;
+    nb::ndarray<float, nb::numpy, nb::ndim<3>, nb::c_contig>;
 
 class Decoder : public FLAC::Decoder::Stream {
 public:
@@ -112,12 +115,79 @@ arrow::Result<std::shared_ptr<arrow::Table>> read_parquet() {
   return table;
 }
 
+class AudioWave {
+public:
+  explicit AudioWave() {}
+
+  static std::vector<float> to_spectrogram(OutputWave &buffer,
+                                           const float &SAMPLE_RATE,
+                                           const float &FRAME_DURATION,
+                                           const float &OFFSET_DURATION) {
+    const size_t size = buffer.size();
+
+    // frame size in samples (400)
+    const int FRAME_SIZE = SAMPLE_RATE * FRAME_DURATION;
+    const int OFFSET = std::max<float>(1.0, SAMPLE_RATE * OFFSET_DURATION);
+    const int K = FRAME_SIZE / 2 + 1;
+    const size_t n_frames = (size + OFFSET - 1) / OFFSET;
+
+    std::vector<float> spectrogram(n_frames * K);
+    std::vector<float> out_buffer(FRAME_SIZE);
+    size_t p = 0;
+
+    for (int i = 0; i < size; i += OFFSET) {
+      const auto window_size = std::min(static_cast<size_t>(FRAME_SIZE),
+                                        static_cast<size_t>(size - i));
+
+      std::fill(out_buffer.begin(), out_buffer.end(), 0.0f);
+      AudioWave::compute_window(buffer, i, window_size, FRAME_SIZE, out_buffer);
+      AudioWave::discrete_fourier_transform(spectrogram, p, out_buffer,
+                                            FRAME_SIZE, K);
+    }
+
+    return spectrogram;
+  }
+
+private:
+  static void compute_window(OutputWave &buffer, const int &pos,
+                             const int &window_size, const int &FRAME_SIZE,
+                             std::vector<float> &out_buffer) {
+    // Hamming window
+    for (int i = 0; i < window_size; ++i) {
+      out_buffer[i] =
+          buffer[pos + i] *
+          (0.54f - 0.46f * std::cos(2.0f * std::numbers::pi * i / FRAME_SIZE));
+    }
+  }
+
+  static void discrete_fourier_transform(std::vector<float> &spectrogram,
+                                         size_t &p,
+                                         const std::vector<float> &window,
+                                         const int &FRAME_SIZE,
+                                         const int &bins) {
+    const auto end = p + bins;
+    const float c1 = ((2 * std::numbers::pi) / FRAME_SIZE);
+    int k = 0;
+    for (; p < end; ++p) {
+      const float c2 = c1 * k;
+      float real = 0, imag = 0;
+      for (int i = 0; i < FRAME_SIZE; ++i) {
+        const auto theta = c2 * i;
+        real += window[i] * std::cos(theta);
+        imag -= window[i] * std::sin(theta);
+      }
+      spectrogram[p] = std::sqrt(real * real + imag * imag);
+      ++k;
+    }
+  }
+};
+
 class FLACDatasetIter {
 public:
   explicit FLACDatasetIter() : table(*read_parquet()) {}
 
   AudioWaveBatch next_batch() {
-    auto *batch = new std::vector<uint16_t>();
+    auto *batch = new std::vector<float>();
     // note that nb::ndarray requires a storage with a contiguous layout
     // when the Order template argument is set to nb::c_contig
 
@@ -139,16 +209,31 @@ public:
 
     decoder.finish();
 
-    batch->insert(batch->end(), output_wave->begin(), output_wave->end());
+    const float SAMPLE_RATE = 16000.0;          // 16KHz
+    const float FRAME_DURATION = 25.0 / 1000.0; // 25 ms = 0.025 s
+    const float OFFSET_DURATION = 10.0 / 1000.0;
+    const int FRAME_SIZE = SAMPLE_RATE * FRAME_DURATION;
+    const int OFFSET = std::max<float>(1.0, SAMPLE_RATE * OFFSET_DURATION);
+
+    /* [0, K) positive discrete frequency bands.
+     * Freqs in the range [K, N) are negative.
+     */
+    const size_t K = FRAME_SIZE / 2 + 1;
+    const size_t n_frames = (output_wave->size() + OFFSET - 1) / OFFSET;
+
+    auto spectrogram = AudioWave::to_spectrogram(
+        *output_wave, SAMPLE_RATE, FRAME_DURATION, OFFSET_DURATION);
+
+    batch->insert(batch->end(), spectrogram.begin(), spectrogram.end());
 
     // Delete 'batch' when the 'owner' capsule expires
     nb::capsule owner(batch, [](void *p) noexcept {
-      delete static_cast<std::vector<uint16_t> *>(p);
+      delete static_cast<std::vector<float> *>(p);
     });
 
     // increment this->cur_audio_idx
 
-    return AudioWaveBatch(batch->data(), {1, output_wave->size()}, owner);
+    return AudioWaveBatch(batch->data(), {1, n_frames, K}, owner);
   }
 
 private:
