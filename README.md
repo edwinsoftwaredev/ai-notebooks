@@ -16,3 +16,5 @@
 [Wikitext-103 OASST1 LM](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/wikitext103_oasst1_lm) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/wikitext103_oasst1_lm)
 
 [Agentic RAG](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/rag_agent) | [Notebook](https://www.kaggle.com/code/edwinsoftwaredev/fork-of-rag-agent)
+
+[Wave Renderer](https://github.com/edwinsoftwaredev/ai-notebooks/tree/dev/wave_renderer) | [Notebook](https://www.kaggle.com/code/edwinsoftwaredev/wave-renderer)
