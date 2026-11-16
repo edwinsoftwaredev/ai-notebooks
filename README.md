@@ -14,3 +14,5 @@
 [MPI3D WGAN-GP](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/mpi3d_gan) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/mpi3d_base_gan)
 
 [Wikitext-103 OASST1 LM](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/wikitext103_oasst1_lm) | [Model visualization](https://wandb.ai/edwinsoftwaredev-personal/wikitext103_oasst1_lm)
+
+[Agentic RAG](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/rag_agent) | [Notebook](https://www.kaggle.com/code/edwinsoftwaredev/fork-of-rag-agent)
