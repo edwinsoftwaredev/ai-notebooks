@@ -17,4 +17,4 @@
 
 [Agentic RAG](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/rag_agent) | [Notebook](https://www.kaggle.com/code/edwinsoftwaredev/fork-of-rag-agent)
 
-[Wave Renderer](https://github.com/edwinsoftwaredev/ai-notebooks/tree/dev/wave_renderer) | [Notebook](https://www.kaggle.com/code/edwinsoftwaredev/wave-renderer)
+[Wave Renderer](https://github.com/edwinsoftwaredev/ai-notebooks/tree/main/wave_renderer) | [Notebook](https://www.kaggle.com/code/edwinsoftwaredev/wave-renderer)
